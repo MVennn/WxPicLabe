@@ -43,9 +43,15 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
  * 发现变了就把历史整体清掉 —— 单向信号，不需要跨进程监听器。
  */
 @Composable
-internal fun ImgLabelSendScreen() {
+internal fun ImgLabelSendScreen(onOpenScope: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scrollState = rememberScrollState()
+
+    val onlySelected by rememberBoolPref(
+        ConfigKeys.IMG_LABEL_SCOPE_ONLY_SELECTED,
+        ConfigKeys.DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED,
+    )
+    val scopeIds by rememberStringSetPref(ConfigKeys.IMG_LABEL_SCOPE_IDS, emptySet())
 
     val repeat by rememberBoolPref(
         ConfigKeys.IMG_LABEL_REPEAT_COUNT,
@@ -59,6 +65,26 @@ internal fun ImgLabelSendScreen() {
             .verticalScroll(scrollState),
     ) {
         Spacer(Modifier.height(8.dp))
+
+        SmallTitle(stringResource(R.string.img_label_section_scope))
+        Card(modifier = Modifier.cardPadding()) {
+            GsSwitchPreference(
+                checked = onlySelected,
+                onCheckedChange = { v ->
+                    ModulePreferences.edit {
+                        putBoolean(ConfigKeys.IMG_LABEL_SCOPE_ONLY_SELECTED, v)
+                    }
+                },
+                title = stringResource(R.string.img_label_scope_switch),
+                summary = stringResource(R.string.img_label_scope_summary),
+            )
+            BasicComponent(
+                title = stringResource(R.string.img_label_scope_entry),
+                summary = stringResource(R.string.img_label_scope_entry_summary, scopeIds.size),
+                endActions = { ArrowRightIcon() },
+                onClick = onOpenScope,
+            )
+        }
 
         SmallTitle(stringResource(R.string.img_label_section_repeat))
         Card(modifier = Modifier.cardPadding()) {

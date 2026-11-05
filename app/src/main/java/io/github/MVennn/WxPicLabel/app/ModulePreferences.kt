@@ -72,6 +72,7 @@ object ModulePreferences {
             if (rp != null) {
                 GLog.i("配置后端 = REMOTE（框架已连接）")
                 migrateLocalToRemote(lp, rp)
+                ensureRemoteDefaults(rp)
             } else {
                 GLog.w("配置后端 = LOCAL（框架未连接，改动暂存在本地）")
             }
@@ -139,6 +140,51 @@ object ModulePreferences {
         if (ok) {
             lp.edit().remove(DIRTY_KEY).commit()
             GLog.i("已把本地配置同步到 remote preferences（写 $written 项、删 $removed 项）")
+        }
+    }
+
+    /**
+     * 框架连上后，把 [ConfigKeys.DEFAULTS] 里**远端还没有的键**补写一份。
+     *
+     * ## 为什么需要这一步（「第一次进软件就把记忆建起来」）
+     *
+     * 全仓的读取一律是 `getBoolean(key, 默认值)` —— 键不存在时回落默认值，
+     * 所以不补也能跑。但远端存储里长期只有「用户手动动过的那几个键」，
+     * 带来三个实际问题，全都在这两个仓里真实发生过：
+     *  1. **备份 / 调试导出是一份残缺的表**：`snapshotConfig()` 里大半是 null，
+     *     导出 JSON 要靠 `defaults` 段反推，人工对比时极易误判成「配置丢了」；
+     *  2. **默认值改版没有锚点**：老用户远端没有这个键，新版默认值一改就直接生效
+     *     （这次「功能默认关闭」正是靠它生效），可一旦哪天要把某个键钉在老默认值上，
+     *     没有存量键就没有迁移的依据；
+     *  3. **断连期间的修改覆盖不回去**：本地写入靠 [DIRTY_KEY] 记脏键，
+     *     远端连键都不存在时，`migrateLocalToRemote` 的「缺失键」与「脏键」两条路径
+     *     会算出同一个结果，日志里分不清是「补新键」还是「覆盖旧值」。
+     *
+     * ## 只补缺失键，绝不覆盖
+     *
+     * 远端已有的键一律不动（那是用户的真实选择），因此本方法每次连接都能跑、幂等，
+     * 不会把用户关掉的开关又打开。顺序上必须排在 [migrateLocalToRemote] **之后**：
+     * 先把断连期间本地改过的值搬上去，再补剩下的空位。
+     *
+     * ## 不写本机界面状态
+     *
+     * [ConfigKeys.DISCLAIMER_ACCEPTED] 走本地文件（见 [getLocalBoolean]），
+     * 不属于 remote 配置 —— [ConfigKeys.DEFAULTS] 里也已经没有它。
+     */
+    private fun ensureRemoteDefaults(rp: SharedPreferences) {
+        val existing = runCatching { rp.all }.getOrNull() ?: return
+        val missing = ConfigKeys.DEFAULTS.filterKeys { it !in existing }
+        if (missing.isEmpty()) return
+        val ok = runCatching {
+            val e = rp.edit()
+            for ((k, v) in missing) putValue(e, k, v)
+            e.commit()
+        }.getOrElse { t ->
+            GLog.w("补齐出厂默认键失败", t)
+            false
+        }
+        if (ok) {
+            GLog.i("首次连接：已把 ${missing.size} 个出厂默认键写入 remote preferences（${missing.keys.joinToString()})")
         }
     }
 
@@ -220,6 +266,10 @@ object ModulePreferences {
 
     fun getString(key: String, def: String): String = active()?.getString(key, def) ?: def
 
+    /** 读字符串集合（会话白名单用）。远端没有这个键时返回 [def]。 */
+    fun getStringSet(key: String, def: Set<String>): Set<String> =
+        runCatching { active()?.getStringSet(key, def) ?: def }.getOrElse { def }
+
     fun all(): Map<String, *> = active()?.all ?: emptyMap<String, Any>()
 
     /** 只取 [ConfigKeys.ALL_KEYS] 范围内的配置（备份用，避免把无关键带出去） */
@@ -256,6 +306,7 @@ object ModulePreferences {
                 is Boolean -> putBoolean(k, v)
                 is Int -> putInt(k, v)
                 is String -> putString(k, v)
+                is Set<*> -> putStringSet(k, v.mapNotNull { it as? String }.toSet())
             }
         }
     }

@@ -3,12 +3,21 @@ package io.github.MVennn.WxPicLabel.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +54,14 @@ internal sealed interface Route {
     data object Notice : Route
     /** 「发送图片文件名 → 发送设置」：同名图片重复发送时的次数追加与记录清空 */
     data object ImgLabelSend : Route
+    /** 「发送设置 → 选择好友与群聊」：会话白名单的勾选页 */
+    data object ImgLabelScope : Route
+}
+
+/** 二级页按返回时该回哪一层（白名单页是发送设置的子页）。 */
+private fun backTarget(r: Route): Route = when (r) {
+    Route.ImgLabelScope -> Route.ImgLabelSend
+    else -> Route.Home
 }
 
 /** 页面滑动动画时长 */
@@ -63,12 +80,14 @@ private object RouteSaver : Saver<Route, String> {
         Route.Disclaimer -> "disclaimer"
         Route.Notice -> "notice"
         Route.ImgLabelSend -> "img_label_send"
+        Route.ImgLabelScope -> "img_label_scope"
     }
 
     override fun restore(value: String): Route = when (value) {
         "disclaimer" -> Route.Disclaimer
         "notice" -> Route.Notice
         "img_label_send" -> Route.ImgLabelSend
+        "img_label_scope" -> Route.ImgLabelScope
         else -> Route.Home
     }
 }
@@ -127,7 +146,7 @@ internal fun MainScreen(initialRoute: Route = Route.Home) {
         PredictiveBackHandler(enabled = route != Route.Home) { flow ->
             try {
                 flow.collect { subProgress.snapTo(1f - it.progress) }
-                route = Route.Home
+                route = backTarget(route)
             } catch (e: CancellationException) {
                 // 手势取消：滑回去
                 scope.launch { subProgress.animateTo(1f, tween(200)) }
@@ -135,10 +154,17 @@ internal fun MainScreen(initialRoute: Route = Route.Home) {
             }
         }
     } else {
-        BackHandler(enabled = route != Route.Home) { route = Route.Home }
+        BackHandler(enabled = route != Route.Home) { route = backTarget(route) }
     }
 
-    val p = subProgress.value
+    // 滑动进度**只在图层块里读**，组合期不读。
+    //
+    // 组合期读动画值（原来的 `val p = subProgress.value`）会让整页在 300ms 滑动里
+    // 每帧重组一次：MainScreen → HomeScaffold → 当前板块整棵树，全部跟着跑一遍。
+    // 实机上这就是「左右滑动卡」的主因之一；模拟器分辨率低、CPU 富余，看不出来。
+    // 现在组合期只留一个折叠成布尔的门槛判断（决定二级页要不要挂着），
+    // 进度本身在 graphicsLayer 的 lambda 里读 —— 那是图层阶段，只失效绘制，不重组。
+    val subMounted by remember { derivedStateOf { subProgress.value > 0.001f } }
     // 页面底色 = colorScheme.surface，**不是** colorScheme.background。
     //
     // Miuix 的取值很反直觉（0.9.3 实测）：
@@ -164,6 +190,8 @@ internal fun MainScreen(initialRoute: Route = Route.Home) {
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
+                    // 图层阶段读进度：只重绘、不重组（见上方 subMounted 的注释）
+                    val p = subProgress.value
                     val s = 1f - 0.06f * p
                     scaleX = s
                     scaleY = s
@@ -190,37 +218,71 @@ internal fun MainScreen(initialRoute: Route = Route.Home) {
         }
 
         // ---- 第 2 层：二级页（右滑进出）----
-        if (route != Route.Home || p > 0.001f) {
+        if (route != Route.Home || subMounted) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     // p = 1 时完全覆盖（位移 0），p = 0 时滑到屏幕右侧之外
-                    .graphicsLayer { translationX = size.width * (1f - p) }
+                    .graphicsLayer { translationX = size.width * (1f - subProgress.value) }
                     .background(background),
             ) {
-                when (shownSub) {
-                    Route.Disclaimer -> SubScreen(
-                        title = stringResource(R.string.disclaimer_detail_title),
-                        onBack = { route = Route.Home },
-                    ) {
-                        DisclaimerScreen()
-                    }
+                // 同一层内的页间切换（发送设置 ↔ 好友选择）用左右滑动过渡；
+                // 首次从首页盖上时整层已经在滑，这里不再叠加内容动画。
+                AnimatedContent(
+                    targetState = shownSub,
+                    transitionSpec = {
+                        when {
+                            initialState == Route.Home || targetState == Route.Home ->
+                                EnterTransition.None togetherWith ExitTransition.None
 
-                    Route.Notice -> SubScreen(
-                        title = stringResource(R.string.notice_detail_title),
-                        onBack = { route = Route.Home },
-                    ) {
-                        NoticeScreen()
-                    }
+                            backTarget(initialState) == targetState ->
+                                // 返回：旧页滑出向右，新页从左侧跟进
+                                (slideInHorizontally(tween(RouteAnimMillis)) { -it / 3 }
+                                        + fadeIn(tween(RouteAnimMillis))) togetherWith
+                                        (slideOutHorizontally(tween(RouteAnimMillis)) { it }
+                                                + fadeOut(tween(RouteAnimMillis)))
 
-                    Route.ImgLabelSend -> SubScreen(
-                        title = stringResource(R.string.img_label_send_title),
-                        onBack = { route = Route.Home },
-                    ) {
-                        ImgLabelSendScreen()
-                    }
+                            else ->
+                                // 进入更深一层：新页从右侧滑入，旧页向左退 1/3
+                                (slideInHorizontally(tween(RouteAnimMillis)) { it }
+                                        + fadeIn(tween(RouteAnimMillis))) togetherWith
+                                        (slideOutHorizontally(tween(RouteAnimMillis)) { -it / 3 }
+                                                + fadeOut(tween(RouteAnimMillis)))
+                        }
+                    },
+                    label = "subPage",
+                ) { sub ->
+                    when (sub) {
+                        Route.Disclaimer -> SubScreen(
+                            title = stringResource(R.string.disclaimer_detail_title),
+                            onBack = { route = Route.Home },
+                        ) {
+                            DisclaimerScreen()
+                        }
 
-                    Route.Home -> Unit
+                        Route.Notice -> SubScreen(
+                            title = stringResource(R.string.notice_detail_title),
+                            onBack = { route = Route.Home },
+                        ) {
+                            NoticeScreen()
+                        }
+
+                        Route.ImgLabelSend -> SubScreen(
+                            title = stringResource(R.string.img_label_send_title),
+                            onBack = { route = Route.Home },
+                        ) {
+                            ImgLabelSendScreen(onOpenScope = { route = Route.ImgLabelScope })
+                        }
+
+                        Route.ImgLabelScope -> SubScreen(
+                            title = stringResource(R.string.img_label_scope_entry),
+                            onBack = { route = Route.ImgLabelSend },
+                        ) {
+                            ScopePickerScreen()
+                        }
+
+                        Route.Home -> Unit
+                    }
                 }
             }
         }

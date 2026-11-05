@@ -77,6 +77,21 @@
             tools:ignore="ExportedContentProvider" />
 
         <!--
+            好友名单回传通道（微信进程 → 模块 App）。
+
+            remote preferences 在目标进程侧只读（edit() 直接抛异常），名单只能反向走
+            Provider。安全模型与上面的调试通道相同：不声明 signature permission
+            （微信没有本模块签名，声明了会把微信挡死），改用运行时 UID 白名单
+            （本应用 / root / shell / com.tencent.mm），见 FriendBridgeProvider。
+        -->
+        <provider
+            android:name=".app.FriendBridgeProvider"
+            android:authorities="io.github.MVennn.WxPicLabel.bridge"
+            android:exported="true"
+            android:enabled="true"
+            tools:ignore="ExportedContentProvider" />
+
+        <!--
             注意：现代 API 模块不再使用 legacy meta-data。
             LSPosed 的判定逻辑是「manifest 里出现 xposedminversion 就当 legacy 模块」，
             保留它们反而会让模块被识别成旧式模块、去走 assets/xposed_init 那条路。

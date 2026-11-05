@@ -232,4 +232,17 @@
     <string name="img_label_repeat_clear">清空发送记录</string>
     <string name="img_label_repeat_clear_summary">下次发送时重新从 1 开始计数</string>
     <string name="img_label_repeat_cleared">已清空发送记录</string>
+    <string name="img_label_section_scope">发送范围</string>
+    <string name="img_label_scope_switch">仅选中的会话生效</string>
+    <string name="img_label_scope_summary">打开后只对勾选的好友、群聊追加文件名</string>
+    <string name="img_label_scope_entry">选择好友与群聊</string>
+    <string name="img_label_scope_entry_summary">已选 %1$d 个</string>
+    <string name="scope_selected_count">已选 %1$d 个</string>
+    <string name="scope_total_count">共 %1$d 个会话</string>
+    <string name="scope_empty_hint">还没读取过名单，点这一行刷新</string>
+    <string name="scope_section_empty">名单</string>
+    <string name="scope_empty_body">名单由微信进程在后台读取。点上面「已选 0 个」那一行触发一次抓取，几秒后回来。</string>
+    <string name="scope_section_rooms">群聊（%1$d）</string>
+    <string name="scope_section_friends">好友（%1$d）</string>
+    <string name="scope_search_hint">搜索昵称或微信号</string>
 </resources>

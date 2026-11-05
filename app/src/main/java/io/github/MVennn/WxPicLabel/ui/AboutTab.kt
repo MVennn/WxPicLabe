@@ -183,7 +183,7 @@ internal fun AboutTab(
             // 2.17.2 起关于页只回答「谁写的、用了谁的东西、有什么后果」：
             // 「模块信息」整组（模块名称 / 版本 / 作用范围 / 目标框架）与「技术细节」
             // 整组（Hook 入口 / 挂钩点 / 判定依据 / 控件 ID / 配置通道）都请出了界面。
-            // 完整档案在 docs/ARCHITECTURE.md 与 docs/REVERSE-ENGINEERING.md。
+            // 完整档案在 docs/ARCHITECTURE.md（链路）与 docs/SEND-DESIGN.md（逆向与实测清单）。
             SmallTitle(stringResource(R.string.section_author))
             DeveloperCard(
                 name = stringResource(R.string.about_value_developer),

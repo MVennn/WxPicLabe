@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.MVennn.WxPicLabel"
         minSdk = 27
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         buildConfigField("String", "MIUIX_VERSION", "\"$miuixVersion\"")
         buildConfigField("String", "BUILD_TIME", "\"" + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date()) + "\"")
         ndk {
@@ -39,9 +39,29 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
-            isMinifyEnabled = false
+            // R8 必须开：界面卡不卡主要就差在这一步。
+            //
+            // 实测（2026-11-06）：同一份 UI 代码在 debug 包里左右切页明显掉帧，
+            // release（R8 + shrinkResources）就顺 —— 两包在模拟器上帧数据一致
+            // （p99 10ms / 0 jank），差别只在实机上被放大的那部分 CPU 开销：
+            // debug 包 debuggable=true，ART 不做 AOT、Compose 的 lambda 也没被内联，
+            // 每帧的重组 / 绘制调用都是完整走一遍。
+            //
+            // 入口类的 keep 规则见 proguard-rules.pro（漏一条就是「装上不生效」）。
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
+    }
+
+    // 只打包中英文：依赖库（androidx / Compose / Miuix）自带几十种语言，
+    // 全量进包对中文用户毫无用处，且拖慢首次启动时的资源解析。
+    androidResources {
+        localeFilters += listOf("zh", "en")
     }
 
     compileOptions {
@@ -57,6 +77,10 @@ android {
 
     lint {
         abortOnError = false
+        // release 变体的 lintVital 会对 SettingsActivity 误报 Instantiatable
+        // （Kotlin internal 类，实际是 public 且可实例化；debug 包装上去能正常启动）。
+        // 与 GSAuxiliary 的取舍一致：不让它挡住打包。
+        checkReleaseBuilds = false
     }
 }
 
@@ -79,4 +103,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("io.github.kyant0:backdrop:1.0.6")
+
+    // 纯 JVM 单测：core/ConfigKeys 刻意不引用任何 Android / Xposed 类（见它的 KDoc），
+    // 所以配置契约能在宿主上直接跑，不需要 Robolectric，也不需要真机。
+    testImplementation("junit:junit:4.13.2")
 }

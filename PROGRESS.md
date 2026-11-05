@@ -2,6 +2,56 @@
 
 > **一句话**：本仓任务与验收记录，按批次追加。
 
+## 2026-11-06 · 相册「文件名」开关（完成，随 v0.3.0 发版）
+
+**需求**：微信相册选图页「原图」右边加一个同款开关「文件名」，勾着才补文件名、不勾就微信原生发送；显隐跟随功能总开关与会话白名单；退出相册 / 重启微信不复位。
+
+**踩点（静态 + 运行时双证）**
+- 静态（子代理，`.work/evidence/agent-album-ui.md`）：「原图」不是 CheckBox，是 `RelativeLayout(原图行) [WeImageView 圆点 + TextView "原图"]`，勾选态靠换 `res/raw/radio_checked.svg` ↔ `radio_off_white.svg`；底栏是 `RelativeLayout`，原图行 `CENTER_IN_PARENT`
+- 运行时（`debug.wxpiclabel.uidump=1` 打视图树）：底栏 `900x72`，原图行 `412,0,487,72`；勾上「原图」后底栏变 `900x140`（「发送后合并展示」行由 GONE 转 INVISIBLE 占位 68px）
+
+**踩的两个坑（都写在 `docs/ALBUM-FILENAME-BUTTON.md`）**
+- 第一版照抄原图行 LayoutParams 插到同一个父容器 → 两个视图叠在一起（父容器是 `CENTER_IN_PARENT`）
+- 第二版改成 `CENTER_IN_PARENT` 居中 → 勾一下「原图」底栏变高，按钮整体上跳 34px
+- 定稿：自绘圆点图标 + 文字行，`RIGHT_OF/ALIGN_TOP/ALIGN_BOTTOM` 全部对齐原图行，布局后按实测宽度算 `dx` 让「原图 + 文件名」整体居中；只改 `translationX`，不碰微信的 LayoutParams
+
+**实现**
+- `feature/imglabel/AlbumMemoryToggle.java`（新）：构造器钩子 + 6 次重试注入、找「原图」文本、造行、点击翻转、状态落 `SharedPreferences("wxpiclabel_state")` 的 `album_memory_on`
+- `WxPicLabelModule.java`：`hookAlbumToggle` / `scheduleAlbumInject` / `albumScopeAllows` / `memoryOn`；接管入口、`flushFallback`、`armFromParams` 三处加「文件名」闸
+
+**验证（模拟器 emulator-5554 / Android 12 / 微信 8.0.80）**
+- 注入后底栏：`预览(1) | ○原图 ○文件名 | 发送(1)`，几何日志 `src=412,0,487,72 mine=502,0,600,72 dx=-56`
+- 勾原图后底栏 72→140，两行 box 同步（`src=…68,487,140` / `mine=…68,600,140`）—— 不再上跳
+- 不勾「文件名」发图：`fallback: memory off, drop 1`，聊天里只有图、没有文字
+- 每次点击一条 `filename toggle: true/false`；`debug.wxpiclabel.albumtoggle=0` 时不注入
+
+**发版**：versionCode 3 / versionName 0.3.0，release 包走 `build.cmd release`
+
+## 2026-11-06 · 实机左右切页卡顿排查与优化
+
+**现象**：模块界面左右切页在实机上明显掉帧，同 UI 的 GSAuxiliary 不卡；模拟器上两者都看不出问题。
+
+**排查（先证伪「代码问题」）**
+- 归一化包名 / 品牌名后全量对比两仓 35 vs 141 个 Kotlin 文件：同名文件 13 个有差异，**全部是品牌串、图标路径、日志文件名、tag**；UI 目录（Screens / Dock / Glass / LiquidPhysics / Widgets / ModuleTab / SettingsTab / AboutTab / PrefState）**0 处逻辑差异**
+- 同一模拟器（1600×900）同脚本实测：debug 包 1331 帧 / legacy janky 70.70%；release 包 1255 帧 / 45.26% —— 两者肉眼都不卡，说明代码路径不是差异源
+- 关键证据：GSAuxiliary 分发包 `.work/GSAuxiliary_57-3.6.0.apk` = **1.59 MB、单 dex**（R8 裁剪过的 release）；本仓此前只有 debug 包（12.2 MB、debuggable）
+
+**结论**：不是 UI 代码问题，是构建产物问题 —— debug 包 `debuggable=true`，ART 不做 AOT、Compose lambda 未内联，每帧重组 / 绘制完整走一遍；模拟器分辨率低、CPU 富余看不出来，实机高分辨率高刷直接顶穿帧预算。
+
+**改动**
+- `app/build.gradle.kts`：release 开 `isMinifyEnabled` / `isShrinkResources` / `localeFilters`，`lint.checkReleaseBuilds = false`（lintVital 对 `internal` 的 SettingsActivity 误报 Instantiatable）
+- 新增 `app/proguard-rules.pro`：`WxPicLabelModule`（`java_init.list` 反射实例化）、`WxPicApp` / `SettingsActivity` / `DebugConfigProvider`、`io.github.libxposed.service.**`、`ConfigKeys`
+- `build.cmd`：支持 `build.cmd release`（`%*` 不受 shift 影响，改为逐个收集剩余参数）
+- `ui/Routing.kt`：`val p = subProgress.value` 从组合期移到 `graphicsLayer` lambda，组合期只留 `derivedStateOf` 门槛
+
+**验证**
+- `build.cmd release` → `BUILD SUCCESSFUL in 1m 5s`，APK 1,200,488 B（debug 12,197,748 B）
+- 包内：单 dex、`META-INF/xposed/*` 三个声明文件齐全；dex 里 `WxPicLabelModule` / `SettingsActivity` / `WxPicApp` / `DebugConfigProvider` 均在
+- 模拟器实装：`flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]`（debuggable 消失），设置页渲染正常（截图 `.work/shot-rel-1.png`），`logcat -b crash` 空
+- `tools/check-docs.py` 15 篇全绿
+
+**待实机确认**：把 `app/build/outputs/apk/release/app-release.apk` 装到真机，左右切页是否已顺（模拟器分辨不出差异）
+
 ## 2026-11-06 · 清除 GSAuxiliary 残留 + 目录按五层重整（完成）
 
 - [x] 可达性分析：143 个源文件里 85 个从真实入口（WxPicLabelModule / WxPicApp / SettingsActivity / DebugConfigProvider / LauncherIcon）不可达 —— 全是 GSAuxiliary 的证券业务代码

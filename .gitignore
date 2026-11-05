@@ -37,6 +37,8 @@ __pycache__/
 # 本地调试产物
 .work/
 *.log
+# 审计 / 排查证据分片（子代理产出，属过程记录，不进库）
+evidence/
 
 # 系统
 .DS_Store

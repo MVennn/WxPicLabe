@@ -1,5 +1,6 @@
 package io.github.MVennn.WxPicLabel;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -23,7 +24,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.github.MVennn.WxPicLabel.core.ConfigKeys;
+import io.github.MVennn.WxPicLabel.feature.imglabel.AlbumMemoryToggle;
+import io.github.MVennn.WxPicLabel.feature.imglabel.FriendExporter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RepeatCounter;
+import io.github.MVennn.WxPicLabel.feature.imglabel.ScopeGate;
 import io.github.MVennn.WxPicLabel.feature.imglabel.UiSender;
 import io.github.MVennn.WxPicLabel.util.Reflect;
 
@@ -77,6 +81,11 @@ public class WxPicLabelModule extends XposedModule {
     /** 接管期间禁止兜底队列抢发。 */
     private volatile long takeoverUntil;
 
+    /** 最近一次发送的会话 id（接管与兜底共用，白名单判定要用）。 */
+    private volatile String lastTalker;
+    /** 已处理过的「刷新好友名单」令牌，轮询里比对。 */
+    private volatile String lastScopeRefresh;
+
     // ------------------------------------------------------------------ 兜底队列
 
     private volatile ArrayList<String> pendingLabels;
@@ -111,6 +120,64 @@ public class WxPicLabelModule extends XposedModule {
         installAll(wxLoader, false);
         startInstallPoller();
         startFallbackPoller();
+        startFriendProbe();
+    }
+
+    /**
+     * 探针：微信起来 12 秒后（等它自己的库打开）在后台读一次好友与群聊。
+     *
+     * <p>只打日志、不改任何数据。换成正式的名单回传之前，先用它验证
+     * {@link FriendExporter} 在当前微信版本上真的能拿到 rcontact 里的数据。
+     */
+    private void startFriendProbe() {
+        main.postDelayed(() -> requestFriendSync("startup"), 12_000L);
+    }
+
+    /**
+     * 抓一遍联系人并回传给模块 App。
+     *
+     * <p>启动后自动跑一次（等微信自己的库打开），设置页点「刷新」时由令牌触发再跑。
+     * 抓的是**当前登录账号**的 rcontact，所以换号即换名单。
+     */
+    private void requestFriendSync(final String why) {
+        new Thread(() -> {
+            try {
+                List<FriendExporter.Entry> list = FriendExporter.fetch(loader(), this::log);
+                int friends = 0;
+                int rooms = 0;
+                for (FriendExporter.Entry e : list) {
+                    if (e.kind == FriendExporter.KIND_CHATROOM) {
+                        rooms++;
+                    } else {
+                        friends++;
+                    }
+                }
+                log("friends: fetched " + list.size() + " (friends=" + friends
+                        + ", rooms=" + rooms + ") reason=" + why);
+                Context ctx = appContext();
+                if (ctx == null) {
+                    log("friends: no app context, skip push");
+                    return;
+                }
+                FriendExporter.push(ctx, list, this::log);
+            } catch (Throwable t) {
+                log("friends: sync failed: " + t);
+            }
+        }, "wxpiclabel-friends-sync").start();
+    }
+
+    /** 设置页点了「刷新好友名单」就把令牌换一个新值，这里比对后重新抓取。 */
+    private void checkScopeRefresh() {
+        String refreshMark = cfgStr(ConfigKeys.IMG_LABEL_SCOPE_REFRESH, "");
+        if (refreshMark.equals(lastScopeRefresh)) {
+            return;
+        }
+        lastScopeRefresh = refreshMark;
+        if (refreshMark.isEmpty()) {
+            return;
+        }
+        log("friends: refresh token changed, re-sync");
+        requestFriendSync("refresh-token");
     }
 
     /**
@@ -152,6 +219,7 @@ public class WxPicLabelModule extends XposedModule {
         hookTakeover(cl);
         hookBatchEntry(cl);
         hookImageSent(cl);
+        hookAlbumToggle(cl);
         if (real) {
             log("hooks installed on real loader");
         }
@@ -197,13 +265,20 @@ public class WxPicLabelModule extends XposedModule {
             try {
                 hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
-                            if (!takeoverEnabled() || !featureEnabled()
+                            if (!takeoverEnabled() || !featureEnabled() || !memoryOn()
                                     || Boolean.TRUE.equals(replayGuard.get())) {
                                 return chain.proceed();
                             }
                             Object params = chain.getArg(pi);
                             Object callback = chain.getArg(ci);
                             try {
+                                // 会话白名单：不在名单里就完全不接管，图照发、只是不带文件名
+                                String talker = talkerOf(params);
+                                lastTalker = talker;
+                                if (!scopeAllowed(talker)) {
+                                    log("takeover: talker=" + talker + " not in scope, let wechat send");
+                                    return chain.proceed();
+                                }
                                 entryMethod = m;
                                 entryThis = chain.getThisObject();
                                 entryArgs = chain.getArgs().toArray();
@@ -211,7 +286,9 @@ public class WxPicLabelModule extends XposedModule {
                                     log("takeover: replay not ready, let wechat send");
                                     return chain.proceed();
                                 }
-                                log("takeover: intercepted, params=" + className(params));
+                                log("takeover: intercepted, params=" + className(params)
+                                        + " talker.c=" + talker
+                                        + " talker.ia5a=" + talkerOfArg(chain.getArgs()));
                                 if (callback instanceof Runnable) {
                                     main.post((Runnable) callback);   // 相册收工，别卡「正在发送中」
                                 }
@@ -530,11 +607,104 @@ public class WxPicLabelModule extends XposedModule {
         }
     }
 
+    // ------------------------------------------------------------------ 钩子：相册「记忆」开关
+
+    /**
+     * 相册页（{@code AlbumPreviewUI}）一构造就排注入任务，把「记忆」勾选框加到「原图」右边。
+     *
+     * <p>挂**构造器**而不是生命周期方法：AlbumPreviewUI 自己没声明
+     * onCreate/onResume（都在混淆父类链上），挂基类 {@code Activity#onResume}
+     * 实测零命中；构造器不会被覆盖，且每次打开相册都是新实例，天然覆盖每次进入。
+     *
+     * <p>显隐跟随两道配置：总开关（feature_img_label）关 → 不注入；
+     * 「仅选中的会话生效」开着且当前会话不在名单 → 不注入。
+     */
+    private void hookAlbumToggle(ClassLoader cl) {
+        if (!markHooked("albumToggle@" + System.identityHashCode(cl))) {
+            return;
+        }
+        try {
+            final Class<?> album = Reflect.findClass(
+                    "com.tencent.mm.plugin.gallery.ui.AlbumPreviewUI", cl);
+            if (album == null) {
+                log("memory: AlbumPreviewUI not found, album toggle disabled");
+                return;
+            }
+            for (java.lang.reflect.Constructor<?> c : album.getDeclaredConstructors()) {
+                try {
+                    c.setAccessible(true);
+                    hook(c).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                            .intercept(chain -> {
+                                Object ret = chain.proceed();
+                                try {
+                                    Object self = chain.getThisObject();
+                                    if (self instanceof Activity) {
+                                        scheduleAlbumInject((Activity) self);
+                                    }
+                                } catch (Throwable t) {
+                                    log("memory: album hook failed: " + t);
+                                }
+                                return ret;
+                            });
+                    log("hooked album toggle: AlbumPreviewUI#<init>");
+                } catch (Throwable t) {
+                    log("hook album ctor failed: " + t);
+                }
+            }
+        } catch (Throwable t) {
+            log("hook album toggle failed: " + t);
+        }
+    }
+
+    /**
+     * 构造器里视图还没 setContentView，定时重试注入：
+     * 300ms 后第一试，「原图」还没出现就每 400ms 再试，最多 6 次。
+     */
+    private void scheduleAlbumInject(final Activity act) {
+        final int[] tries = {0};
+        final Runnable[] task = new Runnable[1];
+        task[0] = () -> {
+            try {
+                boolean show = featureEnabled() && albumScopeAllows(act);
+                String res = AlbumMemoryToggle.inject(act, show, this::log);
+                if (res != null && res.contains("not found") && ++tries[0] < 6) {
+                    main.postDelayed(task[0], 400L);
+                    return;
+                }
+                if (res != null) {
+                    log(res);
+                }
+            } catch (Throwable t) {
+                log("memory: inject task failed: " + t);
+            }
+        };
+        main.postDelayed(task[0], 300L);
+    }
+
+    /** 相册页对应的会话是否在发送范围里；talker 取不到时按放行处理（与 ScopeGate 口径一致）。 */
+    private boolean albumScopeAllows(Activity act) {
+        return scopeAllowed(AlbumMemoryToggle.talkerOfAlbum(act));
+    }
+
+    /** 「记忆」勾选框是否勾着；上下文拿不到时按勾选处理（宁可多生效，不可整体失效）。 */
+    private boolean memoryOn() {
+        Context ctx = appContext();
+        return ctx == null || AlbumMemoryToggle.isOn(ctx);
+    }
+
     // ------------------------------------------------------------------ 兜底队列
 
     /** 用 Vj 的实参武装兜底队列（只在接管不生效时才会走到）。 */
     private void armFromParams(Object params) {
+        if (params != null) {
+            lastTalker = talkerOf(params);
+        }
         if (params == null || pendingLabels != null || !featureEnabled()) {
+            return;
+        }
+        // 「记忆/文件名」没勾：连文字都别算 —— RepeatCounter 在 textFor 里会 bump 次数，
+        // 算了却不发，下一次发送的 +N 就凭空跳号
+        if (!memoryOn()) {
             return;
         }
         // 走到这里说明这一批没有接管（接管会先清掉 pendingLabels），
@@ -576,6 +746,7 @@ public class WxPicLabelModule extends XposedModule {
             public void run() {
                 try {
                     flushFallback();
+                    checkScopeRefresh();
                 } catch (Throwable t) {
                     log("fallback: flush failed: " + t);
                 }
@@ -591,6 +762,18 @@ public class WxPicLabelModule extends XposedModule {
             return;
         }
         if (!featureEnabled()) {
+            pendingLabels = null;
+            return;
+        }
+        // 「记忆」没勾：这批不带文件名，兜底队列直接清掉
+        if (!memoryOn()) {
+            log("fallback: memory off, drop " + labels.size());
+            pendingLabels = null;
+            return;
+        }
+        // 兜底队列也要过白名单这道闸，否则「接管没跑起来」时白名单会被绕过
+        if (!scopeAllowed(lastTalker)) {
+            log("fallback: talker=" + lastTalker + " not in scope, drop " + labels.size());
             pendingLabels = null;
             return;
         }
@@ -668,6 +851,28 @@ public class WxPicLabelModule extends XposedModule {
         return cfgBool(ConfigKeys.IMG_LABEL, ConfigKeys.DEFAULT_IMG_LABEL);
     }
 
+    /** 会话白名单判定（规则见 ScopeGate）。 */
+    private boolean scopeAllowed(String talker) {
+        if (!cfgBool(ConfigKeys.IMG_LABEL_SCOPE_ONLY_SELECTED,
+                ConfigKeys.DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED)) {
+            return true;
+        }
+        return ScopeGate.allowed(true, cfgStringSet(ConfigKeys.IMG_LABEL_SCOPE_IDS), talker);
+    }
+
+    private java.util.Set<String> cfgStringSet(String key) {
+        SharedPreferences p = cfgPrefs();
+        if (p == null) {
+            return java.util.Collections.emptySet();
+        }
+        try {
+            java.util.Set<String> v = p.getStringSet(key, null);
+            return v == null ? java.util.Collections.emptySet() : v;
+        } catch (Throwable t) {
+            return java.util.Collections.emptySet();
+        }
+    }
+
     /** 计数仓库懒加载；建不出来就返回 null（调用方按第 1 次处理）。 */
     private RepeatCounter repeatCounter() {
         RepeatCounter r = repeat;
@@ -723,6 +928,43 @@ public class WxPicLabelModule extends XposedModule {
         }
         log("repeat: label=" + label + " count=" + n + " text=" + text);
         return text;
+    }
+
+    // ------------------------------------------------------------------ talker
+
+    /**
+     * 当前这批图要发给谁：{@code qa0.k#c}。
+     *
+     * <p>写入点是 {@code SendImgProxyUI$$a#run()}，它从相册 Intent 的
+     * {@code GalleryUI_ToUser} 取值后写进这个字段；微信自己随后拿它调
+     * {@code z3#U4}（= {@code endsWith("@chatroom") || endsWith("@im.chatroom")}）判群聊。
+     */
+    private static String talkerOf(Object params) {
+        if (params == null) {
+            return "null";
+        }
+        Object v = Reflect.getFieldByNames(params, "c");
+        return v instanceof String ? (String) v : (v == null ? "null" : String.valueOf(v));
+    }
+
+    /** 兜底对照：{@code ia5.a#o()}（微信把它放进统计键 send_to_username）。 */
+    private static String talkerOfArg(List<Object> args) {
+        for (Object a : args) {
+            if (a == null) {
+                continue;
+            }
+            try {
+                Method m = a.getClass().getDeclaredMethod("o");
+                m.setAccessible(true);
+                Object v = m.invoke(a);
+                if (v instanceof String) {
+                    return (String) v;
+                }
+            } catch (Throwable ignored) {
+                // 不是那个类
+            }
+        }
+        return "-";
     }
 
     // ------------------------------------------------------------------ 工具

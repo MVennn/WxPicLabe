@@ -7,8 +7,10 @@ package io.github.MVennn.WxPicLabel.core
  * 保证模块 App 不会因为加载它而意外触发 Xposed 类的加载。
  *
  * 配置分两类：
- *  - **功能开关**（[ENABLED] / [IMG_LABEL]）：目标进程要读，必须同步进 [ConfigSnapshot]，
- *    并通过 `ConfigSource.read()` 读取。
+ *  - **功能开关**（[ENABLED] / [IMG_LABEL]）：目标进程要读，必须登记进 [SNAPSHOT_KEYS]，
+ *    并由 `WxPicLabelModule` 的 `cfgBool()` 直读。本仓功能数少，**没有**独立的
+ *    快照层（`ConfigSnapshot` / `ConfigSource`）—— 那是 GSAuxiliary 有 20+ 个功能时
+ *    才值得的一层；判定口径与将来接入时机见 `docs/CONFIG-MEMORY.md` §7。
  *  - **模块设置**（[LOG_LEVEL] / [DESKTOP_ICON] / [LIQUID_GLASS] / [GLASS_EFFECT] /
  *    [LANGUAGE] / [THEME] / [PREDICTIVE_BACK]）：只有模块 App 自己的进程消费，
  *    **不进 ConfigSnapshot** —— 目标进程不需要知道界面长什么样。
@@ -54,6 +56,31 @@ object ConfigKeys {
      * 这是唯一不需要跨进程监听器的通知方式。
      */
     const val IMG_LABEL_REPEAT_RESET = "img_label_repeat_reset"
+
+    /**
+     * 「发送范围」：是否**只**对勾选的好友 / 群聊生效。
+     *
+     * 关 = 所有会话都带文件名（默认，装上就能用）；开 = 只对 [IMG_LABEL_SCOPE_IDS]
+     * 里勾选的会话生效，其余会话退回微信原生发送（图照发、不带文件名）。
+     */
+    const val IMG_LABEL_SCOPE_ONLY_SELECTED = "img_label_scope_only_selected"
+
+    /**
+     * 勾选的会话 username（`wxid_xxx` / `xxx@chatroom`）。
+     *
+     * 名单存在 remote preferences 里由微信进程读取；好友**名字**不走这里 ——
+     * 名字由微信进程抓取后经 FriendBridgeProvider 回传给设置页显示。
+     */
+    const val IMG_LABEL_SCOPE_IDS = "img_label_scope_ids"
+
+    /**
+     * 「刷新好友名单」的**单向令牌**（毫秒时间戳字符串）。
+     *
+     * 与 [IMG_LABEL_REPEAT_RESET] 同一套模式：设置页每点一次「刷新」就写一个新值，
+     * 微信进程轮询比对，发现变了就重新抓一遍联系人并经 Provider 回传。
+     */
+    const val IMG_LABEL_SCOPE_REFRESH = "img_label_scope_refresh"
+
 
     /**
      * 是否已阅读并同意免责声明。
@@ -129,15 +156,26 @@ object ConfigKeys {
     /**
      * 功能开关的出厂默认值。
      *
-     * 「发图带文件名」默认**开**：模块装完就是这个功能本身，用户装它就是为了这个。
+     * **所有功能开关一律默认关闭** —— 口径与 GSAuxiliary 2.11.2 起完全一致：
+     * 装完模块、什么都不改，目标 App 的行为与原生一模一样；用户想要哪个功能自己去开。
+     * 三条理由，都是踩过的：
+     *  1. 装完就悄悄改掉别人的行为，用户第一反应是「微信怎么怪怪的」，而不是「模块真好用」；
+     *  2. 「重置模块」的语义是「回到原生」—— 默认值若不是关，重置就等于没关
+     *     （GSAuxiliary 2.3.1 修过这个 bug）；
+     *  3. 默认值必须与 [FEATURE_KEYS] 的「重置 = 显式写 false」一致，否则重置结果随默认值漂移。
+     *
+     * ⚠️ **子参数不适用本条**：[DEFAULT_IMG_LABEL_REPEAT_COUNT] 这类只在总开关打开后才有意义，
+     * 默认值保持 true，等于「开了总开关就是完整形态」，用户不必再进二级页开一遍。
      */
     const val DEFAULT_ENABLED = false
 
-    const val DEFAULT_IMG_LABEL = true
+    const val DEFAULT_IMG_LABEL = false
 
     const val DEFAULT_IMG_LABEL_REPEAT_COUNT = true
 
     const val DEFAULT_IMG_LABEL_REPEAT_RESET = ""
+
+    const val DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED = false
 
     const val DEFAULT_DESKTOP_ICON = true
 
@@ -155,13 +193,28 @@ object ConfigKeys {
     /** 默认开启可预测返回（Android 13+ 跟手预览；低版本系统会自动退化为普通返回） */
     const val DEFAULT_PREDICTIVE_BACK = true
 
+    /**
+     * 免责声明同意态的回落值 —— **不在 [DEFAULTS] 里**，也不是模块配置。
+     *
+     * 它只做 `rememberLocalBoolPref(DISCLAIMER_ACCEPTED, DEFAULT_DISCLAIMER_ACCEPTED)`
+     * 的缺键回落值：本地文件没有这个键 = 还没同意过 = 弹不可关闭的门槛弹窗。
+     * 为什么不进 [ALL_KEYS] / [DEFAULTS]，见 [ALL_KEYS] 的注释。
+     */
     const val DEFAULT_DISCLAIMER_ACCEPTED = false
 
     // ---------------------------------------------------------------- 数据管理
 
-    /** 会被备份 / 恢复 / 重置覆盖的全部配置键 */
+    /**
+     * 会被备份 / 恢复 / 重置覆盖的全部配置键。
+     *
+     * ⚠️ **[DISCLAIMER_ACCEPTED] 不在其中**（GSAuxiliary 同口径）：它是**本机界面状态**，
+     * 不是模块配置。放进来会有两个坏结果 —— 备份文件带着「已同意」跑到另一台机器上
+     * （换机即绕过免责声明）；「重置模块」把它一起清掉，用户每重置一次就要再点一次同意。
+     * 它走 [io.github.MVennn.WxPicLabel.app.ModulePreferences.getLocalBoolean] 的本地文件。
+     */
     val ALL_KEYS = arrayOf(
         ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
+        IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         DISCLAIMER_ACCEPTED,
         DESKTOP_ICON, LIQUID_GLASS, GLASS_EFFECT, LANGUAGE, THEME, PREDICTIVE_BACK,
         LOG_LEVEL,
@@ -181,7 +234,10 @@ object ConfigKeys {
      * [IMG_LABEL_REPEAT_COUNT] 是「重复图片追加次数」的子选项：重置时回到默认值
      * true，而不是被当成开关关掉。
      */
-    val FEATURE_PARAM_KEYS = arrayOf(IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET)
+    val FEATURE_PARAM_KEYS = arrayOf(
+        IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
+        IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
+    )
 
     /**
      * **进配置快照的键** —— 目标进程真正会读的那些。
@@ -190,22 +246,33 @@ object ConfigKeys {
      * 玻璃效果 / 语言 / 深色模式 / 可预测返回）：它们走同一个 remote preferences 分组，
      * 改一下也会给目标进程推一条变更通知，而目标进程**根本不需要知道**。
      *
-     * 用途：`ConfigSource` 收到变更通知时先用它挡一道，省掉一次全量读 + 构造快照 + 算指纹。
+     * 用途：目标进程侧若将来接入变更监听，收到通知时先用它挡一道，省掉一次全量读。
+     * 本仓目前没有监听层（`WxPicLabelModule` 是每次用时直读），这一组是**预留登记口径**：
+     * 现在就登记好，接入时才不会漏。
      *
-     * ⚠️ **只增不减**：新增配置键时，若它要进 [ConfigSnapshot]，必须同时加进这里，
-     * 否则目标进程**收不到**它的变更。
+     * ⚠️ **只增不减**：新增配置键时，若目标进程要读它，必须同时加进这里，
+     * 否则将来接入变更监听后**收不到**它的变更。
      */
     val SNAPSHOT_KEYS: Set<String> = setOf(
-        ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET, LOG_LEVEL,
+        ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
+        IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
+        LOG_LEVEL,
     )
 
-    /** 全部配置键的出厂默认值；备份文件的 `defaults` 与「重置模块」都以此为准 */
+    /**
+     * 全部配置键的出厂默认值；备份文件的 `defaults` 段、`resetToDefaults()`、
+     * 以及首次连接时补齐远端缺失键（`ModulePreferences.ensureRemoteDefaults`）都以此为准。
+     *
+     * **不含 [DISCLAIMER_ACCEPTED]**，理由见 [ALL_KEYS]。
+     */
     val DEFAULTS: Map<String, Any> = mapOf(
         ENABLED to DEFAULT_ENABLED,
         IMG_LABEL to DEFAULT_IMG_LABEL,
         IMG_LABEL_REPEAT_COUNT to DEFAULT_IMG_LABEL_REPEAT_COUNT,
         IMG_LABEL_REPEAT_RESET to DEFAULT_IMG_LABEL_REPEAT_RESET,
-        DISCLAIMER_ACCEPTED to DEFAULT_DISCLAIMER_ACCEPTED,
+        IMG_LABEL_SCOPE_ONLY_SELECTED to DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED,
+        IMG_LABEL_SCOPE_IDS to emptySet<String>(),
+        IMG_LABEL_SCOPE_REFRESH to "",
         DESKTOP_ICON to DEFAULT_DESKTOP_ICON,
         LIQUID_GLASS to DEFAULT_LIQUID_GLASS,
         GLASS_EFFECT to DEFAULT_GLASS_EFFECT,

@@ -49,11 +49,40 @@ if defined ANDROID_SDK_ROOT (
 ) else (
     echo [build] SDK=sdk.dir from local.properties
 )
-call "%GRADLE_BIN%" :app:assembleDebug --no-daemon --console=plain %*
+REM ---------------------------------------------------------------------------
+REM  Target variant:  build.cmd          -> debug (default, fast, LAGGY on real devices)
+REM                  build.cmd release  -> release (R8 on; this is the one to install)
+REM  Everything after the variant word is forwarded to Gradle.
+REM ---------------------------------------------------------------------------
+REM  %* 不受 shift 影响，所以这里手动把变体词摘掉、其余参数逐个收集
+set "VARIANT=debug"
+if /I "%~1"=="release" (
+    set "VARIANT=release"
+    shift
+) else if /I "%~1"=="debug" (
+    shift
+)
+
+set "EXTRA="
+:collect_args
+if "%~1"=="" goto args_done
+set "EXTRA=%EXTRA% %1"
+shift
+goto collect_args
+:args_done
+set "TASK=:app:assembleDebug"
+set "APK=%ROOT%\app\build\outputs\apk\debug\app-debug.apk"
+if /I "%VARIANT%"=="release" (
+    set "TASK=:app:assembleRelease"
+    set "APK=%ROOT%\app\build\outputs\apk\release\app-release.apk"
+)
+
+echo [build] variant=%VARIANT%
+call "%GRADLE_BIN%" %TASK% --no-daemon --console=plain %EXTRA%
 if errorlevel 1 (
     echo [FAILED] build error
     exit /b 1
 )
 
-echo [ok] APK: %ROOT%\app\build\outputs\apk\debug\app-debug.apk
+echo [ok] APK: %APK%
 endlocal

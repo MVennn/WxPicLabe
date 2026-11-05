@@ -71,6 +71,18 @@ internal fun rememberStringPref(key: String, def: String): MutableState<String> 
     return st
 }
 
+/** 字符串集合（会话白名单） */
+@Composable
+internal fun rememberStringSetPref(key: String, def: Set<String>): MutableState<Set<String>> {
+    val st = remember(key) { mutableStateOf(ModulePreferences.getStringSet(key, def)) }
+    DisposableEffect(key) {
+        val listener = { st.value = ModulePreferences.getStringSet(key, def) }
+        ModulePreferences.observe(listener)
+        onDispose { ModulePreferences.unobserve(listener) }
+    }
+    return st
+}
+
 /** 框架服务连接状态 */
 @Composable
 internal fun rememberConnected(): MutableState<Boolean> {

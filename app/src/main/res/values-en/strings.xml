@@ -226,4 +226,17 @@
     <string name="img_label_repeat_clear">Clear sending record</string>
     <string name="img_label_repeat_clear_summary">Start counting from 1 again on the next send</string>
     <string name="img_label_repeat_cleared">Sending record cleared</string>
+    <string name="img_label_section_scope">Send scope</string>
+    <string name="img_label_scope_switch">Only selected chats</string>
+    <string name="img_label_scope_summary">Append file names only in the friends and groups selected below</string>
+    <string name="img_label_scope_entry">Choose friends and groups</string>
+    <string name="img_label_scope_entry_summary">%1$d selected</string>
+    <string name="scope_selected_count">%1$d selected</string>
+    <string name="scope_total_count">%1$d chats in total</string>
+    <string name="scope_empty_hint">List not loaded yet, tap to refresh</string>
+    <string name="scope_section_empty">List</string>
+    <string name="scope_empty_body">The list is read by the WeChat process in the background. Tap the row above to fetch it, then come back in a few seconds.</string>
+    <string name="scope_section_rooms">Groups (%1$d)</string>
+    <string name="scope_section_friends">Friends (%1$d)</string>
+    <string name="scope_search_hint">Search name or WeChat ID</string>
 </resources>

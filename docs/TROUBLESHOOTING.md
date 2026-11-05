@@ -8,10 +8,14 @@
 
 **步骤**
 
-1. LSPosed 管理器 → 模块，确认「微信发图带文件名」已启用；
-2. 作用域里确认勾的是**微信**（`com.tencent.mm`），不是微信分身或别的包；
-3. 强制停止微信后重新打开（模块在进程启动时注入，热重载不一定可靠）；
-4. 看日志：`adb shell su -c "grep WxPicLabel /data/adb/lspd/log/modules_*.log | tail -50"`。
+1. **先看设置页：「发送图片文件名」开关是打开的吗？**
+   功能开关出厂默认**关闭**（见 [CONFIG-MEMORY.md](CONFIG-MEMORY.md) §1），装完什么都不改就是
+   **完全不接管** —— 而且日志里一行都不会有（模块在 Hook 入口就返回了）。这是最常见的原因，
+   先排除它再往下查；
+2. LSPosed 管理器 → 模块，确认模块本身已启用；
+3. 作用域里确认勾的是**微信**（`com.tencent.mm`），不是微信分身或别的包；
+4. 强制停止微信后重新打开（模块在进程启动时注入，热重载不一定可靠）；
+5. 看日志：`adb shell su -c "grep WxPicLabel /data/adb/lspd/log/modules_*.log | tail -50"`。
 
 **原因 / 解法**
 
