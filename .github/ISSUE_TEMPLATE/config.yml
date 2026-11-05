@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 排错手册
+    url: https://github.com/MVennn/WxPicLabe/blob/main/docs/TROUBLESHOOTING.md
+    about: 模块不生效、名字贴错、崩溃的排查步骤

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 前景层：相框 + 两条文件名横线（本模块图形，108 画布；安全区按 GSAuxiliary 同一系数收进 34.2 半径） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M24,28 h60 v38 h-60 z"
+        android:strokeColor="@color/ic_launcher_accent"
+        android:strokeWidth="6"
+        android:fillColor="#00000000"
+        android:strokeLineJoin="round"/>
+    <path android:pathData="M30,74 h42 v6 h-42 z" android:fillColor="@color/ic_launcher_accent"/>
+    <path android:pathData="M30,86 h26 v6 h-26 z" android:fillColor="@color/ic_launcher_accent2"/>
+</vector>

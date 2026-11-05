@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WxPicLabel</string>
+    <!-- 现代 API 模块的描述取自 android:description（不再是 xposeddescription meta-data） -->
+    <string name="xposed_description">Make WeChat Picture Great Again!</string>
+
+    <!-- ============================ 通用 ============================ -->
+    <string name="common_back">返回</string>
+    <string name="common_unknown">未知</string>
+
+    <!-- ============================ 底栏 ============================ -->
+    <string name="tab_module">概览</string>
+    <string name="tab_feature">功能</string>
+    <string name="tab_settings">设置</string>
+    <string name="tab_about">关于</string>
+
+    <string name="subtitle_module">环境概览</string>
+    <string name="subtitle_feature">功能菜单</string>
+    <string name="subtitle_settings">模块设置</string>
+    <string name="subtitle_about">关于</string>
+
+    <!-- ============================ 概览页 ============================ -->
+    <!-- 顶部状态卡 -->
+    <string name="overview_status_active">已激活</string>
+    <string name="overview_status_inactive">未激活</string>
+    <string name="overview_status_disconnected">未连接</string>
+    <string name="overview_status_no_framework">未连接到 LSPosed 框架</string>
+
+    <!-- 分组一：模块自身 -->
+    <string name="section_overview_module">模块</string>
+    <string name="info_module_version">模块版本</string>
+    <string name="info_build_time">构建时间</string>
+    <string name="framework_info_unreadable">已连接（信息不可读）</string>
+
+    <!-- 分组二：手机与依赖库 -->
+    <string name="section_overview_runtime">运行环境</string>
+    <string name="info_android_version">安卓版本</string>
+    <string name="info_device_model">设备型号</string>
+    <string name="info_miuix_version">Miuix 版本</string>
+
+    <!-- ============================ 功能页 ============================ -->
+    <!-- 功能分区：见 ui/FeatureCatalog.kt 顶部的「分区归属标准」；文案与命名规范见 docs/NAMING.md -->
+
+    <!-- 登录 -->
+
+
+
+
+
+
+
+
+    <!-- 自选 -->
+
+    <!-- 自选分组复制 · 规则设置 -->
+
+
+
+    <!-- 底栏 -->
+
+    <!-- 首页 -->
+
+    <!-- 行情市场 -->
+
+
+
+
+
+    <!-- 显示 -->
+
+    <!-- 智能盯盘 -->
+
+    <!-- 配置按钮的二级设置（第二个入口）：多方案时是否还弹选择层 -->
+
+    <!-- ============================ 优化确定逻辑（智能盯盘价格页） ============================ -->
+
+    <!-- ============================ 保存后免确认（智能盯盘价格页） ============================ -->
+
+    <!-- ============================ 盯盘数据卡片拓展（智能盯盘） ============================ -->
+
+    <!-- ============================ 配置按钮设置（二级菜单） ============================ -->
+
+    <!-- ============================ 一键配置 · 方案设置（二级菜单） ============================ -->
+    <!-- 新建 / 添加 两行由主色 + 加号图标示意是动作，文字里不再写 ＋ -->
+    <!-- 新建方案的取名前缀：后面依次接 1、2、3…（新建方案1 / 新建方案2） -->
+    <!-- 独立分组标题（比行标题少一个字，避免同一句话说两遍） -->
+
+    <!-- ============================ 直达标准行情（二级菜单） ============================ -->
+    <!-- 总开关在一级页面（功能 Tab）；二级菜单只放总开关之外的参数，不重复放开关。
+         开关不带副标题：标题已把行为说完（2.17.2 起，规则见 docs/NAMING.md §3） -->
+
+    <!-- ============================ 高亮颜色设置（二级菜单） ============================ -->
+    <!-- 页面标题就是分组名，页内不再放同名 SmallTitle；开关不带钩子目标这类开发者向说明（2.17.2） -->
+
+    <!-- ============================ 设置页 ============================ -->
+    <string name="section_interface">界面</string>
+    <string name="item_desktop_icon">桌面图标</string>
+    <string name="item_desktop_icon_summary_off">已隐藏，可从 LSPosed 重新打开本页</string>
+
+    <!-- 材质设置：液态玻璃是顶栏 + 悬浮底栏的总开关 -->
+    <string name="section_dock">材质设置</string>
+    <string name="item_liquid_glass">液态玻璃</string>
+    <string name="liquid_glass_off">已关闭，顶栏与底栏为纯色</string>
+    <string name="item_glass_effect">玻璃光效</string>
+    <string name="item_glass_effect_summary_on">完整的玻璃光效</string>
+    <string name="item_glass_effect_summary_off">简约版本</string>
+
+    <string name="section_general">通用</string>
+    <string name="item_theme">主题设置</string>
+    <string name="item_language">语言</string>
+    <string name="item_predictive_back">可预测返回</string>
+    <string name="item_predictive_back_summary_on">返回跟手预览（安卓 13+）</string>
+    <string name="item_predictive_back_summary_off">普通返回动画</string>
+
+    <string name="section_data">数据管理</string>
+    <string name="item_backup">备份配置</string>
+    <string name="item_restore">恢复配置</string>
+    <string name="item_reset">重置模块</string>
+    <string name="item_reset_summary">关闭全部功能并恢复默认参数</string>
+    <string name="dialog_reset_title">重置模块</string>
+    <string name="dialog_reset_message">重置后模块内的全部配置将被删除！</string>
+    <string name="action_confirm">确定</string>
+    <string name="action_cancel">取消</string>
+    <string name="reset_done">已关闭全部功能并恢复默认参数</string>
+    <string name="backup_working">正在导出…</string>
+    <string name="restore_working">正在恢复…</string>
+    <string name="backup_success">已导出配置到 %1$s</string>
+    <string name="backup_failed">导出失败：%1$s</string>
+    <string name="backup_open_failed">无法打开所选文件</string>
+    <string name="backup_read_failed">无法读取所选文件</string>
+    <string name="restore_success">已恢复 %1$d 项配置</string>
+    <string name="restore_failed">恢复失败：%1$s</string>
+
+    <!-- ============================ 日志 ============================ -->
+    <!-- 等级取值顺序与 core/GLog.kt 的 LogLevel.VALUES 一一对应 -->
+    <string name="section_log">日志</string>
+    <string name="item_log_level">日志等级</string>
+    <string name="item_export_log">导出日志</string>
+    <string name="item_export_log_summary">模块与目标进程日志</string>
+    <string name="log_exporting">正在导出…</string>
+    <string name="log_export_done">已导出日志到 %1$s</string>
+    <string name="log_export_partial">已导出日志到 %1$s（目标进程日志未取到）</string>
+    <string name="log_export_failed">导出失败：%1$s</string>
+
+    <!-- ============================ 关于页 ============================ -->
+    <!-- 只留作者 / 鸣谢 / 免责声明。版本在概览页已有（一页一处不重复摆）；
+         作用范围、目标框架、Hook 技术细节是开发者向的信息，面向用户的界面不写
+         （用户看不懂），完整档案在 docs/（2.17.2 起） -->
+
+    <string name="section_author">关于作者</string>
+    <string name="about_license">开源协议</string>
+    <string name="about_repo">项目仓库</string>
+    <string name="about_value_developer">M.Venn</string>
+    <string name="about_value_handle">@M.Venn</string>
+    <string name="about_value_github">https://github.com/MVennn</string>
+    <string name="about_value_license">Apache-2.0</string>
+    <string name="about_value_repo_url">https://github.com/MVennn/WxPicLabe</string>
+
+    <string name="section_open_source">开源鸣谢</string>
+    <string name="oss_miuix">Miuix</string>
+    <string name="oss_miuix_desc">小米 HyperOS 风格 Compose UI 组件库</string>
+    <string name="oss_lsposed">LSPosed / libxposed</string>
+    <string name="oss_lsposed_desc">模块框架与现代 Xposed API</string>
+    <string name="oss_liquid_glass">AndroidLiquidGlass (backdrop)</string>
+    <string name="oss_liquid_glass_desc">液态玻璃折射与模糊效果</string>
+    <string name="oss_compose">Jetpack Compose / AndroidX</string>
+    <string name="oss_compose_desc">声明式界面框架与 Android 基础组件</string>
+    <string name="oss_kotlin">Kotlin</string>
+    <string name="oss_kotlin_desc">开发语言与标准库</string>
+    <string name="oss_material_icons">Material Icons</string>
+    <string name="oss_material_icons_desc">界面图标的矢量路径数据（自绘，未引入图标库）</string>
+    <string name="oss_hyperisland">HyperIsland</string>
+    <string name="oss_hyperisland_desc">关于页的布局与动效移植自该项目（MIT）</string>
+    <string name="about_third_party">第三方组件声明</string>
+    <string name="about_third_party_desc">查看随 APK 分发的 NOTICE（各开源组件的版权与许可证）</string>
+    <string name="notice_detail_title">第三方组件声明</string>
+    <string name="oss_link_failed">无法打开链接</string>
+
+    <!-- ============================ 首次启动 · 免责声明同意弹窗 ============================ -->
+    <!-- 说明文字是纯文本（入口挪到勾选行）；勾选行拆「前导 + 链接 + 后接」三段，
+         空格用 \u0020 显式转义，避免被资源工具裁掉（链接前后各留一个）。
+         副标题（3.2.0 定稿）：三行，收在「感谢理解与支持」—— 勾选框与按钮就在正下方，
+         不再用文字复述；「请勿用于任何商业用途」这句别删，少了它第三行只剩半句
+         （魅族 20 实测），补上后三行约 21 / 20 / 12 字位，最后一行才立得住。 -->
+    <string name="agreement_title">使用前须知</string>
+    <string name="agreement_message">本模块是用于研究 Android 逆向与 Hook 技术的非商业开源软件，请勿用于任何商业用途，并在 24 小时内删除，感谢理解与支持。</string>
+    <string name="agreement_check_prefix">我已仔细阅读并同意\u0020</string>
+    <string name="agreement_check_link">免责声明</string>
+    <string name="agreement_check_suffix">\u0020的全部内容</string>
+    <string name="agreement_confirm">确定</string>
+
+    <string name="section_disclaimer">免责声明</string>
+    <string name="disclaimer_title">使用即代表同意，请 24 小时内删除</string>
+    <string name="disclaimer_body">本模块为学习研究用的开源软件，非商业用途，与腾讯公司及微信无任何隶属关系；不收集、不上传任何个人信息，全部处理均在本机完成。</string>
+    <string name="disclaimer_detail_title">免责声明</string>
+    <string name="disclaimer_full"># 免责声明\n\n\n本软件（下称“本模块”）系开发者基于 Android 逆向工程与 Hook 技术学习目的自行编写的开源软件，非商业产品，与腾讯公司、微信（WeChat）及任何企业、应用、服务及其关联方不存在任何隶属、合作、授权、认可或支持关系。\n\n*其中免除或者减轻开发者责任的条款均已加粗提示，请在使用前仔细阅读。*\n\n---\n\n## 一、关于使用行为的认定\n\n任何单位或个人下载、安装、启用或以其他任何方式使用本模块，**即视为其已完整阅读、充分理解并自愿接受本声明的全部条款**。\n\n如不同意本声明任何内容的，**应立即停止使用并彻底删除本模块及其全部副本**。\n\n- 本模块仅供技术研究与学习交流之用，不得用于任何商业用途。\n- 使用者应于下载后二十四小时内自行删除。\n\n## 二、关于责任的完全免除\n\n在适用法律允许的最大范围内，本模块的开发者**不对使用者或任何第三方承担任何形式的责任**。\n\n因使用或无法使用本模块所产生的一切风险、损失及后果，均由使用者自行承担，包括但不限于设备损坏、系统异常、数据灭失、应用账号受限或封禁、消息发送失败或错乱，以及任何直接、间接、附带、特殊、惩罚性或后果性损害。\n\n## 三、关于担保与维护\n\n本模块按“现状”提供，不附任何明示或默示的担保。开发者不承诺修复任何缺陷、不承诺维护或技术支持，并有权随时终止分发或修改功能而无须事先通知。\n\n微信客户端升级或加固策略变化可能导致本模块失效，使用者应自行评估并决定是否停用。\n\n## 四、关于合规义务\n\n使用者应自行确认并遵守其所在国家或地区的法律法规以及微信的服务条款与隐私政策。本模块完全免费开源，不通过销售、订阅、广告、打赏或其他任何方式获取经济利益。\n\n## 五、关于关联关系与商标\n\n本模块与腾讯公司及微信无任何隶属或合作关系，“微信”“WeChat”等名称与商标的权利均归其权利人所有，此处仅作客观描述之用。\n\n## 六、关于个人信息与网络行为\n\n本模块**不收集、不传输、不对外提供、不持久化保存任何个人信息**，不含统计、广告或数据回传组件；全部处理均在本机完成：仅在你主动发送图片时读取本次选中的图片文件名，并在聊天中补发一段文字。\n\n本模块**不绕过微信的任何身份验证或技术保护措施**，不获取、不触碰任何超出使用者本人账号授权范围的数据，不接管、不修改你与他人的聊天内容。\n\n## 七、关于条款效力\n\n本声明任何条款如被认定为无效或不可执行，不影响其余条款的效力。开发者有权随时修订本声明，修订后的版本自发布之日起施行。\n\n> 使用者继续使用本模块的，即视为已接受修订后的声明。</string>
+
+    <!-- ============================ 选项数组 ============================ -->
+
+    <!-- 一键配置的取值项名称：与 core/QuickConfigCatalog.ALL 的顺序一一对应 -->
+
+    <string-array name="language_labels">
+        <item>跟随系统</item>
+        <item>简体中文</item>
+        <item>English</item>
+    </string-array>
+
+    <string-array name="theme_labels">
+        <item>跟随系统</item>
+        <item>亮色</item>
+        <item>暗色</item>
+    </string-array>
+
+    <string-array name="log_level_labels">
+        <item>关闭</item>
+        <item>错误</item>
+        <item>信息</item>
+        <item>调试</item>
+    </string-array>
+
+    <!-- 导出/预览文案：写入规则 JSON 时按当前语言生成，目标进程不再取资源 -->
+    <string name="category_img_label">发送</string>
+    <string name="feature_img_label_switch">发送图片文件名</string>
+    <string name="feature_img_label_summary">相册选图发送后，按选图顺序在每张图后补一条文件名</string>
+    <string name="img_label_send_title">发送设置</string>
+    <string name="img_label_send_entry">发送设置</string>
+    <string name="img_label_send_entry_summary">同名图片重复发送时追加次数、清空记录</string>
+    <string name="img_label_section_repeat">重复图片</string>
+    <string name="img_label_repeat_switch">重复图片追加次数</string>
+    <string name="img_label_repeat_summary">同名图片再次发送时，在文字后加 +2、+3…</string>
+    <string name="img_label_section_record">记录</string>
+    <string name="img_label_repeat_clear">清空发送记录</string>
+    <string name="img_label_repeat_clear_summary">下次发送时重新从 1 开始计数</string>
+    <string name="img_label_repeat_cleared">已清空发送记录</string>
+</resources>

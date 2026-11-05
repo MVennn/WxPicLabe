@@ -1,0 +1,55 @@
+name: CI
+
+# 只在开 PR 或手动触发时跑；推分支不自动构建（日常本地 build.cmd + 真机验证完才提交）。
+# 门禁 job 是硬性的；build job 用 ubuntu runner 自己装 SDK，用来确认代码能编过。
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: 文档与凭据门禁
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 文档门禁
+        run: python tools/check-docs.py
+      - name: 凭据门禁
+        run: python tools/check-secrets.py
+
+  build:
+    name: 构建 debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: gates
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: 安装 SDK 组件
+        run: sdkmanager --install "platforms;android-37" "build-tools;36.0.0" > /dev/null
+      - name: 构建
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --console=plain
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn

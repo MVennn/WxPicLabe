@@ -1,0 +1,88 @@
+name: 问题反馈（Bug）
+description: 不补文字、名字贴错、微信崩溃等问题
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请尽量把下面的信息填全，尤其是 **LSPosed 日志**——
+        没有日志的问题很难定位，多半只能来回追问。
+
+  - type: checkboxes
+    id: acknowledgment
+    attributes:
+      label: 反馈前确认
+      options:
+        - label: 我已知悉本模块会 Hook 微信，可能违反其用户协议并带来账号风险，相关风险由我自行承担。
+          required: true
+        - label: 我已阅读并同意仓库中的免责声明（docs/DISCLAIMER.md）。
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 出了什么问题
+      description: 现象 + 复现步骤：选了几张图、预期什么、实际什么。
+      placeholder: |
+        例：
+        1. 微信里选 3 张图发送
+        2. 预期：每张图后跟一条文件名引用
+        3. 实际：只有第一张有
+    validations:
+      required: true
+
+  - type: input
+    id: wechat-version
+    attributes:
+      label: 微信版本号
+      description: 微信「我 → 设置 → 关于」里能看到
+      placeholder: "例：8.0.55"
+    validations:
+      required: true
+
+  - type: input
+    id: module-version
+    attributes:
+      label: 模块版本号
+      placeholder: "例：0.1.0（versionCode 1）"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: 机型与安卓版本
+      placeholder: "例：Redmi K60 / Android 14"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: LSPosed 作用域里「微信」勾了吗
+      options:
+        - 已勾选，且强停微信后重开过
+        - 没勾 / 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: lsposed-log
+    attributes:
+      label: LSPosed 日志
+      description: |
+        电脑连上手机后执行下面这条，把输出整段贴进来：
+
+        ```
+        adb shell su -c "grep WxPicLabel /data/adb/lspd/log/modules_*.log | tail -50"
+        ```
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图或录屏（可选）
+    validations:
+      required: false

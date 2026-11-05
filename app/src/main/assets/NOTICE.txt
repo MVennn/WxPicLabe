@@ -1,0 +1,29 @@
+WxPicLabe
+Copyright 2026 MVennn
+
+This product includes software developed as part of the WxPicLabe project
+(https://github.com/MVennn/WxPicLabe), licensed under the Apache License,
+Version 2.0.
+
+==============================================================================
+Third-party components
+
+This product incorporates third-party software under the following licenses:
+
+- libxposed API (io.github.libxposed:api)
+  https://github.com/libxposed/api
+  Licensed under the Apache License, Version 2.0.
+  Used as compileOnly: the artifact is NOT distributed in the APK; the
+  framework API is provided at runtime by LSPosed.
+
+- Android Gradle Plugin / Gradle
+  https://developer.android.com/build
+  Licensed under the Apache License, Version 2.0.
+  Build-time only; not distributed in the APK.
+
+==============================================================================
+Notes
+
+The WeChat / WeChat trademark and logo are the property of Tencent and its
+affiliates. This project is unofficial and is not affiliated with, endorsed
+by, or supported by Tencent.

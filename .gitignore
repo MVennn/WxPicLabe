@@ -1,0 +1,43 @@
+# Android / Gradle
+.gradle-home/
+.android-home/
+.tmp/
+# 构建产物副本
+apkout/
+dist/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+build/
+.gradle/
+.kotlin/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.hprof
+
+# 签名材料
+*.keystore
+*.jks
+keystore.properties
+
+# IDE / 编辑器
+.idea/
+*.iml
+*.swp
+.vscode/
+
+# Python（tools/ 下的门禁脚本）
+__pycache__/
+*.py[cod]
+
+# 本地调试产物
+.work/
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
