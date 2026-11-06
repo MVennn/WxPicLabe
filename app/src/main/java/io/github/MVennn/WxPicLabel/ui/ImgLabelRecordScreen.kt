@@ -115,6 +115,7 @@ internal fun ImgLabelRecordScreen() {
         Card(modifier = Modifier.cardPadding()) {
             BasicComponent(
                 title = stringResource(R.string.img_label_repeat_clear),
+                // 破坏性操作是唯一例外：留一行说明「会清掉什么范围」
                 summary = stringResource(R.string.img_label_repeat_clear_summary),
                 endActions = { ArrowRightIcon() },
                 onClick = {

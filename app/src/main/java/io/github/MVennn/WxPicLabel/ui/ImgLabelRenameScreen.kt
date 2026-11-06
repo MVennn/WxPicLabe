@@ -133,29 +133,23 @@ internal fun ImgLabelRenameScreen() {
         Card(modifier = Modifier.cardPadding()) {
             BasicComponent(
                 title = stringResource(R.string.rename_save),
-                summary = if (status.isEmpty()) {
-                    stringResource(R.string.rename_save_summary)
-                } else {
-                    status
-                },
+                // 状态类副标题留（已保存 / 已导入…），说明类删（docs/NAMING.md §3）
+                summary = status.takeIf { it.isNotEmpty() },
                 endActions = { ArrowRightIcon() },
                 onClick = { save() },
             )
             BasicComponent(
                 title = stringResource(R.string.rename_import),
-                summary = stringResource(R.string.rename_import_summary),
                 endActions = { ArrowRightIcon() },
                 onClick = { openDoc.launch(arrayOf("text/plain", "text/*")) },
             )
             BasicComponent(
                 title = stringResource(R.string.rename_export),
-                summary = stringResource(R.string.rename_export_summary),
                 endActions = { ArrowRightIcon() },
                 onClick = { createDoc.launch("wxpiclabel-rename.txt") },
             )
             BasicComponent(
                 title = stringResource(R.string.rename_copy),
-                summary = stringResource(R.string.rename_copy_summary),
                 endActions = { ArrowRightIcon() },
                 onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -165,7 +159,6 @@ internal fun ImgLabelRenameScreen() {
             )
             BasicComponent(
                 title = stringResource(R.string.rename_paste),
-                summary = stringResource(R.string.rename_paste_summary),
                 endActions = { ArrowRightIcon() },
                 onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

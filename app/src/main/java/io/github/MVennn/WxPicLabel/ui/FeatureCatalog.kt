@@ -12,7 +12,7 @@ import io.github.MVennn.WxPicLabel.core.ConfigKeys
  *
  * | 分区 | 一句话判据 | 归属范围 |
  * |---|---|---|
- * | **发送** `category_img_label` | 改的是「把图片发出去」这件事本身 | 发图带文件名、重复图片追加次数 |
+ * | **发送** `category_img_label` | 改的是「把图片发出去」这件事本身 | 增加 文件名 开关、重复图片追加次数 |
  *
  * 新增分区之前先想清楚：只有当一个功能**不属于任何一个已有分区**时才新开分区，
  * 并且要同时更新上表、`values/strings.xml` / `values-en/strings.xml` 里的 `category_*`
@@ -72,11 +72,14 @@ internal data class FeatureSpec(
         id = "img_label",
         categoryRes = R.string.category_img_label,
         switchTitleRes = R.string.feature_img_label_switch,
+        // 新增类元素（相册底栏多出来的那个开关）→ 标题三段式；
+        // 三段式只说了「加了什么」，位置说不清 → 副标题只写位置（docs/NAMING.md 规则三 / 规则四）。
         switchSummaryRes = R.string.feature_img_label_summary,
         enableKey = ConfigKeys.IMG_LABEL,
         defaultEnabled = ConfigKeys.DEFAULT_IMG_LABEL,
         detailTitleRes = R.string.img_label_send_title,
         detailEntryRes = R.string.img_label_send_entry,
-        detailEntrySummaryRes = R.string.img_label_send_entry_summary,
+        // 入口名已说清进去做什么 → 不写（docs/NAMING.md §3）
+        detailEntrySummaryRes = null,
     ),
 )

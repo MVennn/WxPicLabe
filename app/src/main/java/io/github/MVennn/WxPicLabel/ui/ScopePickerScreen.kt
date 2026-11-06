@@ -153,11 +153,8 @@ internal fun ScopePickerScreen() {
         Card(modifier = Modifier.cardPadding()) {
             BasicComponent(
                 title = stringResource(R.string.scope_refresh_entry),
-                summary = if (refreshing) {
-                    stringResource(R.string.scope_refreshing)
-                } else {
-                    stringResource(R.string.scope_refresh_summary)
-                },
+                // 说明类副标题删；只留「正在刷新名单…」这个状态（docs/NAMING.md §3）
+                summary = if (refreshing) stringResource(R.string.scope_refreshing) else null,
                 endActions = { ArrowRightIcon() },
                 onClick = { requestRefresh() },
             )

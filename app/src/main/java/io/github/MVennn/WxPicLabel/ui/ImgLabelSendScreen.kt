@@ -23,22 +23,13 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
  *
  * 只放**总开关之外**的参数（一级页只有开关，约定见 [FeatureTab]）：
  *
+ *  - 「发送范围」：是否只对勾选的会话生效 + 名单入口
+ *  - 「发送提示」：进度 Toast 与发送期间屏幕常亮
  *  - 「重复图片」：同名图片再次发送时，在文字后追加 ` +2`、` +3`……
- *  - 「记录」：清空发送记录。
+ *  - 「重命名」「记录」：两个三级页入口（规则编辑 / 记录查看与清空）
  *
- * ## 为什么这里只有开关、没有记录列表
- *
- * 计数存在**微信进程自己**的 SharedPreferences 里（`/data/data/com.tencent.mm/`）——
- * remote preferences 在目标进程侧只读，模块 App 的目录跨 uid 不可写，
- * 这是唯一能落盘的地方。代价就是模块 App **读不到**这份记录，
- * 所以这一页只能给「清空」这一个动作，列表留到以后（要显示得让模块 App
- * 开一个 exported Provider 给微信进程回调）。
- *
- * ## 「清空」怎么生效
- *
- * 不直接删文件（跨 uid 删不到），而是往配置里写一个毫秒时间戳
- * （[ConfigKeys.IMG_LABEL_REPEAT_RESET]）。微信进程每次计数前比对令牌，
- * 发现变了就把历史整体清掉 —— 单向信号，不需要跨进程监听器。
+ * 记录列表与「清空」都在三级页 `ImgLabelRecordScreen` 里 —— 计数存在微信进程
+ * 自己的 SharedPreferences，模块 App 读不到，列表靠 `/records` 回传通道拿。
  */
 @Composable
 internal fun ImgLabelSendScreen(
@@ -86,7 +77,6 @@ internal fun ImgLabelSendScreen(
                     }
                 },
                 title = stringResource(R.string.img_label_scope_switch),
-                summary = stringResource(R.string.img_label_scope_summary),
             )
             BasicComponent(
                 title = stringResource(R.string.img_label_scope_entry),
@@ -104,7 +94,6 @@ internal fun ImgLabelSendScreen(
                     ModulePreferences.edit { putBoolean(ConfigKeys.IMG_LABEL_PROGRESS_TOAST, v) }
                 },
                 title = stringResource(R.string.img_label_hud_toast_switch),
-                summary = stringResource(R.string.img_label_hud_toast_summary),
             )
             GsSwitchPreference(
                 checked = hudKeepOn,
@@ -112,7 +101,6 @@ internal fun ImgLabelSendScreen(
                     ModulePreferences.edit { putBoolean(ConfigKeys.IMG_LABEL_KEEP_SCREEN_ON, v) }
                 },
                 title = stringResource(R.string.img_label_hud_keepon_switch),
-                summary = stringResource(R.string.img_label_hud_keepon_summary),
             )
         }
 
@@ -124,7 +112,6 @@ internal fun ImgLabelSendScreen(
                     ModulePreferences.edit { putBoolean(ConfigKeys.IMG_LABEL_REPEAT_COUNT, v) }
                 },
                 title = stringResource(R.string.img_label_repeat_switch),
-                summary = stringResource(R.string.img_label_repeat_summary),
             )
         }
 
@@ -132,7 +119,6 @@ internal fun ImgLabelSendScreen(
         Card(modifier = Modifier.cardPadding()) {
             BasicComponent(
                 title = stringResource(R.string.rename_entry),
-                summary = stringResource(R.string.rename_entry_summary),
                 endActions = { ArrowRightIcon() },
                 onClick = onOpenRename,
             )
@@ -142,7 +128,6 @@ internal fun ImgLabelSendScreen(
         Card(modifier = Modifier.cardPadding()) {
             BasicComponent(
                 title = stringResource(R.string.record_entry),
-                summary = stringResource(R.string.record_entry_summary),
                 endActions = { ArrowRightIcon() },
                 onClick = onOpenRecord,
             )
