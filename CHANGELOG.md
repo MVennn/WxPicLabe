@@ -2,7 +2,7 @@
 
 ## [0.4.0] - 2026-11-06
 
-- 定位 由「发一图一文」扩为「微信发图功能扩展」：README、免责声明与关于页统一按「接管相册批量发送、按选图顺序逐张发」表述，删掉早已回滚的「引用条」说法
+- 定位 由「发一图一文」扩为「微信 · 发图功能扩展模块」：门面仍是「logo + 标题 + 一行粗体定位 + 标语 + 徽章」五元素（标语位保持口号，不塞功能清单），免责声明与关于页统一按「接管相册批量发送、按选图顺序逐张发」表述，删掉早已回滚的「引用条」说法
 - 补齐 开源鸣谢与第三方组件声明：README 鸣谢表与随 APK 分发的 NOTICE 都补齐到 Miuix / AndroidLiquidGlass(backdrop) / Jetpack Compose·AndroidX / Kotlin / Material Icons / HyperIsland（含 MIT 全文与派生说明），与姊妹项目 GSAuxiliary 同口径
 - 修正 README 的两处过期描述：minSdk 26 → 27（安卓 8.1+）、自测日志关键字 `selection via key=` → `takeover: intercepted`
 

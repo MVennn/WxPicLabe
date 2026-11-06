@@ -4,9 +4,9 @@
 
 # WxPicLabe
 
-**微信 · 发图功能扩展**（非官方，与腾讯及其关联方无任何隶属、合作或授权关系）
+**微信 · 发图功能扩展模块**（非官方，与腾讯及其关联方无任何隶属、合作或授权关系）
 
-让微信发图更顺手：一图一条文字、同名自动计数、发送进度可看
+Make WeChat Picture Great Again！
 
 ![版本](https://img.shields.io/github/v/release/MVennn/WxPicLabe) ![CI](https://github.com/MVennn/WxPicLabe/actions/workflows/ci.yml/badge.svg) ![源码仓库](https://img.shields.io/badge/源码仓库-GitHub-181717?logo=github&logoColor=white) ![问题反馈](https://img.shields.io/badge/问题反馈-Issues-181717?logo=github&logoColor=white) ![Android](https://img.shields.io/badge/Android-8.1%2B-3DDC84?logo=android&logoColor=white) ![LSPosed](https://img.shields.io/badge/LSPosed-API%20102-5C6BC0) ![License](https://img.shields.io/badge/License-Apache--2.0-blue)
 
