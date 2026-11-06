@@ -3,7 +3,7 @@ package io.github.MVennn.WxPicLabel.feature.imglabel;
 import java.util.Set;
 
 /**
- * 会话白名单判定 —— 「发送图片文件名」只在勾选的好友 / 群聊里生效。
+ * 会话白名单判定 —— 「增加 文件名 开关」只在勾选的好友 / 群聊里生效。
  *
  * <p>名单本身存在 remote preferences（模块 App 写、微信进程只读），
  * 这里只做纯判定，不碰任何 IO，方便在拦截点（主线程）上同步调用。

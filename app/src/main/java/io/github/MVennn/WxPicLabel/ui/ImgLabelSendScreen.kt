@@ -19,7 +19,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 
 /**
- * 「发送图片文件名 → 发送设置」二级页。
+ * 「增加 文件名 开关 → 发送设置」二级页。
  *
  * 只放**总开关之外**的参数（一级页只有开关，约定见 [FeatureTab]）：
  *

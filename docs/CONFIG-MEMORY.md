@@ -139,7 +139,7 @@ UI 侧用 `rememberLocalBoolPref`。
 2. **全新安装**（或清掉模块应用数据 + 在 LSPosed 里清掉该模块的 remote prefs）→
    打开设置页 → 日志出现 `首次连接：已把 N 个出厂默认键写入 remote preferences`，
    N = `ConfigKeys.DEFAULTS.size`。
-3. 功能页「发送图片文件名」开关显示**关**；微信相册批量发送行为与原生一致。
+3. 功能页「增加 文件名 开关」显示**关**；微信相册批量发送行为与原生一致。
 4. 打开开关 → 发图带文件名；关掉 → 立即退回原生（不重启微信）。
 5. 「重置模块」→ 开关回到关；**免责声明不再弹出**（同意态没被清）。
 6. 备份导出 → `config` 段有 `feature_img_label` 且为 `false`；**没有** `disclaimer_accepted`。

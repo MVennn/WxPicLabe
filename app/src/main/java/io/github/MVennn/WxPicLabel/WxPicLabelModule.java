@@ -1036,7 +1036,7 @@ public class WxPicLabelModule extends XposedModule {
         }
     }
 
-    /** 「发送图片文件名」总开关：关掉就完全不接管，退回微信原生批量发送。 */
+    /** 「增加 文件名 开关」总开关：关掉就完全不接管，退回微信原生批量发送。 */
     private boolean featureEnabled() {
         return cfgBool(ConfigKeys.IMG_LABEL, ConfigKeys.DEFAULT_IMG_LABEL);
     }

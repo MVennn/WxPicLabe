@@ -40,7 +40,7 @@ internal sealed interface Route {
     data object Home : Route
     data object Disclaimer : Route
     data object Notice : Route
-    /** 「发送图片文件名 → 发送设置」（二级） */
+    /** 「增加 文件名 开关 → 发送设置」（二级） */
     data object ImgLabelSend : Route
     /** 三级：会话白名单勾选 */
     data object ImgLabelScope : Route
