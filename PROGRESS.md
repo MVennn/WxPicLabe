@@ -152,12 +152,12 @@
 - [x] local.properties.example 改占位符 <REPLACE-ANDROID-SDK-DIR>
 - [x] docs/ARCHITECTURE.md 重写：目录结构 + 分层判据 + 接管链路 + 兜底 + 配置计数 + 自测通道
 - [x] 验收：build.cmd → BUILD SUCCESSFUL；python tools/check-docs.py 10 篇 0 失败；python tools/check-secrets.py 100 文件 0 命中
-- [x] 回滚点：.work/pre-restructure-20261106-011930/（193 文件 / 2.4 MB）、.work/purged/（98 个被移出的源文件）
+- [x] 回滚点：`.work/purged/`（98 个被移出的源文件）；重构前整仓快照目录已在 2026-11-06 文档清理时按「重构前完整快照冗余」删除，重构结论见 `CHANGELOG.md` 与本文件后续批次
 - [ ] 入口类仍是单体（约 900 行）：等 feature/imglabel 稳定后再拆 ImgLabelFeature / LabelResolver，拆分口径见 docs/ARCHITECTURE.md
 
 ## 2026-11-05 · 从临时工程落成标准仓（完成）
 
-- [x] 源码从 `DeepseekHarness/.work/wxpiclabel` 迁入 `F:\Project\WxPicLabe`（app、gradle wrapper、构建脚本、Gradle 配置）
+- [x] 源码从 `DeepseekHarness/.work/wxpiclabel` 迁入本仓根（app、gradle wrapper、构建脚本、Gradle 配置）
 - [x] 丢弃构建缓存与产物：`.gradle`、`.gradle-home`、`.android-home`、`.tmp`、`app/build`、`apkout`、`dist`
 - [x] 文档标准化：`README.md` + `docs/{README,ARCHITECTURE,BUILD,DOC-RULES}.md`，索引同步
 - [x] 仓级文件：`AGENTS.md`（补构建与当前阶段）、`CHANGELOG.md`、`.gitattributes`、`local.properties.example`
@@ -180,7 +180,7 @@
 - [x] 排除四条不可行路径：按类名找 `MsgInfoStorage`（混淆）、扫壳 dex（仅 1 个）、Tinker loader（仅增量类）、合并 18 dex（`MsgInfo` 加载不到）
 - [x] 排除 Java 层 SQLite：`insert`/`insertWithOnConflict`/`executeInsert` 三路 Hook 只抓到 WorkManager 表，微信消息落库走 WCDB native
 - [x] 方案改为「选图后延迟补发文件名」：记录顺序 + 文件名 → 缓存 talker（hook `com.tencent.mm.storage.a1` 构造器）→ 3 秒后按序 `WeChatSender.sendText`
-- [ ] 待真机确认：`send label[i]=... ok=true` 是否出现、文件名是否落到聊天里、`WeChatSender` 候选入口是否命中微信 8.0.80
+- [x] 历史尝试已推翻：上述「3 秒后按序 `WeChatSender.sendText`」与待确认项，已由 2026-11-05 批次「8.0.80 无 modelmulti 包、旧 `WeChatSender` 四组候选全部失效、新增 `UiSender`」结论取代
 
 ## 2026-11-05 · 发送链路定型和模拟器实测（完成）
 
@@ -448,6 +448,6 @@
 
 ## 待办
 
-- [ ] 校准 `WeChatSender` 的发送入口（候选列表见 `hostCandidates()`/`METHOD_CANDIDATES`）
-- [ ] 若纯文本可用，再补引用条（需要 msgId，WCDB 拿不到，可考虑从 `a1` 的消息 ID 字段取）
+- [x] 校准 `WeChatSender` 的发送入口：已判不可行（候选类全部失效），发送链路改由 `UiSender` 视图层承担
+- [ ] 引用条待 msgId / svrid 方案：WCDB native 无 Java 插入点，拿到 msgId 之前只发纯文字
 - [ ] UI（总开关 / 白名单）

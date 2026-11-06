@@ -35,7 +35,7 @@
 ## 3. 发版才动版本号
 
 - 未发版前改代码**不动** `versionName` / `versionCode`。
-- 只有明确说「发版」时才：升版本号 → 写 `CHANGELOG.md` → 出 `docs/release-notes/<版>.md` → 打 tag → 发 Release。
+- 只有明确说「发版」时才：升版本号 → 写 `CHANGELOG.md` → 出 Release 说明（本仓当前无 `docs/release-notes/` 子目录，Release 正文用 `<REPLACE-RELEASE-BODY>` 占位或随 GitHub Release 附正文）→ 打 tag → 发 Release。
 - Release 说明三段固定结构（与 GSAuxiliary 同口径）：
   1. 第一行：**加粗的一句话总结**（用户视角，说这一版最值得升级的那件事）；
   2. 第二行：固定反馈入口（Issues 链接 + 要带什么）；

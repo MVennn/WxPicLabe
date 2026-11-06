@@ -21,14 +21,14 @@
 
 | 规则 | 正本 |
 | --- | --- |
-| Hook 点、绑定键、降级策略、待适配 | `ARCHITECTURE.md` |
+| Hook 点、绑定键、降级策略、已知限制 | `ARCHITECTURE.md` |
 | 构建环境、脚本行为、产物 | `BUILD.md` |
 | 版本号位置与晋升 | `VERSIONING.md` |
 | 缺陷的现象/根因/规避 | `PITFALLS.md` |
 | 文档写法 | `DOC-RULES.md`（本篇） |
 | 免责全文 | `DISCLAIMER.md` |
 
-根目录只留 `README / CHANGELOG / CONTRIBUTING / SECURITY / LICENSE / NOTICE / AGENTS / PROGRESS`。
+根目录**文档**只留 `README / CHANGELOG / CONTRIBUTING / SECURITY / LICENSE / NOTICE / AGENTS / PROGRESS`；构建骨架（`build.cmd` / `build.gradle.kts` / `settings.gradle.kts` / `gradlew` / `app/` / `assets/` / `gradle/`）按实际结构保留。
 
 ## 3. 命名
 
@@ -43,7 +43,7 @@ python -c "import os,re;bad=[f for f in os.listdir('docs') if f.lower().endswith
 
 ## 4. 一句话抬头
 
-每篇文档前 10 行内必须有：
+每篇文档前 20 行内必须有（门禁 `HEAD_LINES = 20`）：
 
 ```markdown
 > **一句话**：这篇文档解决什么问题、谁该读它。

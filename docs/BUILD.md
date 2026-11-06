@@ -15,7 +15,7 @@
 ## 构建命令
 
 ```cmd
-cd /d F:\Project\WxPicLabe
+cd /d "%~dp0"
 build.cmd            :: debug，日常编译用，**别装到实机上测流畅度**
 build.cmd release    :: release，开了 R8，实机要装这一个
 ```
@@ -86,7 +86,7 @@ libxposed 服务通道、`ConfigKeys`）。**新增运行期反射入口时必�
 
 ## 已验证
 
-2026-11-05：`BUILD SUCCESSFUL`，APK 20,697 字节；三个 `META-INF/xposed/*` 声明文件与
+2026-11-05（首次构建快照，重建后以实际产物为准）：`BUILD SUCCESSFUL`，APK 20,697 字节；三个 `META-INF/xposed/*` 声明文件与
 `WxPicLabelModule` 入口类都在包内，`io.github.libxposed:api` 未被写入包（compileOnly 生效）。
 
 2026-11-06（release 变体首次打通）：`build.cmd release` → `BUILD SUCCESSFUL in 1m 5s`，

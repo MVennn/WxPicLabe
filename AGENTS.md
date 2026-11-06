@@ -6,7 +6,7 @@
 
 1. 用户当轮明确指令
 2. 本文件（仓级）
-3. 组级 `F:\Project\_merged\LSPosed\AGENTS.md`
+3. 组级 `<WORKSPACE>/_merged/LSPosed/AGENTS.md`（junction 合并视图，只读）
 4. 全局规则（`$DSH_HOME/AGENTS.md`）
 
 例外：§5 凭据、§3 路径纪律是硬约束，第 2、3 条不得覆盖。
@@ -22,7 +22,7 @@
 
 - 文档、脚本、配置里只写**仓库内相对路径**；不写本机绝对路径（换机器即断）。
 - 命令示例从仓根起算：`python tools\check-docs.py`、`docs/DOC-RULES.md`。
-- 本仓只写本仓。邻仓 `F:\Project\GSAuxiliary` 与组级目录 `F:\Project\_merged\LSPosed` 只读，需要跨仓改动先回到用户。
+- 本仓只写本仓。邻仓 `../GSAuxiliary/` 与组级视图 `../_merged/LSPosed/` 只读，需要跨仓改动先回到用户。
 
 ## 4. 变更纪律
 
@@ -53,7 +53,7 @@
 ## 8. 调试产物
 
 - 临时文件、抓包、反编译输出、日志一律进仓内 `.work/` 或 `%TEMP%`；
-  `F:\Project` 根目录零新建，仓根不落散件。
+  工作区根目录零新建，仓根不落散件。
 - `.work/` 不进库，不写进文档当路径示例。
 
 ## 9. 当前阶段
@@ -76,7 +76,7 @@
 ## 11. 门面与文档口径（系列仓基准 = GSAuxiliary）
 
 - README 是**七段式**：`<div align="center">` logo + 标题 + 一行粗体定位 + 标语 + 徽章 `</div>` → 这是什么 / 环境要求 / 安装 / 反馈 / 免责声明 / 开源鸣谢 / 许可证。**禁止「一句话」引言块**，也不链 `docs/README.md` 索引。
-- 根目录只留 `README / CHANGELOG / CONTRIBUTING / SECURITY / LICENSE / NOTICE / AGENTS / PROGRESS`；开发者内容下沉到 `docs/`。
+- 根目录**文档**只留 `README / CHANGELOG / CONTRIBUTING / SECURITY / LICENSE / NOTICE / AGENTS / PROGRESS`；构建骨架（`build.cmd` / `build.gradle.kts` / `settings.gradle.kts` / `gradlew` / `app/` / `assets/` / `gradle/`）按实际结构保留；开发者文档下沉到 `docs/`。
 - `docs/` 命名全大写 + 连字符，单篇 ≤800 行，索引在 `docs/README.md`（孤儿零容忍）。
 - `CONTRIBUTING.md` 必须有「一句话」引言块；Issue 模板在 `.github/ISSUE_TEMPLATE/`（bug / feature / config）。
 - 门面改动与缺陷修复要**双记账**：`CHANGELOG.md` 一行；修缺陷再在 `docs/PITFALLS.md` 补「现象 → 根因 → 怎么避」。
