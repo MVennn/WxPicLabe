@@ -2,12 +2,14 @@ package io.github.MVennn.WxPicLabel.feature.imglabel;
 
 import android.app.Activity;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Map;
@@ -96,6 +98,20 @@ public final class UiSender {
     /** 零延时模式下 setText 未生效的重试计数。 */
     private static int sameRetry;
 
+    /**
+     * 上一轮找到的聊天页 / 输入框 / 发送键。
+     *
+     * <p>一次发送原本要走 3~4 遍全树递归（找输入框 → 找「发送」→ 兜底找右侧可点节点），
+     * 全是主线程 O(视图数)；聊天里每多发一条，树就大一截，于是「图越多越慢」。
+     * 微信聊天页的 footer 在切会话时是复用的，同一 Activity 实例内这些引用稳定，
+     * 所以只校验「还是同一个 Activity + 还挂在窗口上」，命中就直接用。
+     */
+    private static WeakReference<Activity> cachedAct = new WeakReference<>(null);
+    private static WeakReference<View> cachedRoot = new WeakReference<>(null);
+    private static WeakReference<EditText> cachedEt = new WeakReference<>(null);
+    private static WeakReference<View> cachedSend = new WeakReference<>(null);
+    private static boolean cachedLoose;
+
     private static void step() {
         Item item;
         synchronized (QUEUE) {
@@ -107,25 +123,46 @@ public final class UiSender {
             retries = 0;
             return;
         }
-        Activity act = currentActivity();
-        View root = act != null && act.getWindow() != null
-                ? act.getWindow().getDecorView() : null;
-        LOOSE = false;
-        EditText et = root == null ? null : findEditText(root, 0);
-        if (et == null) {
-            // 相册/预览页盖在聊天页上面时，前台 Activity 没有输入框；
-            // 后台的聊天页仍然活着，直接往它的输入框里送，这是「相册里发图时插文字」的关键。
-            Activity bg = chatActivity();
-            if (bg != null && bg.getWindow() != null) {
-                LOOSE = true;
-                act = bg;
-                root = bg.getWindow().getDecorView();
-                et = findEditText(root, 0);
+        Activity top = currentActivity();
+        Activity act = cachedAct.get();
+        View root = cachedRoot.get();
+        EditText et = cachedEt.get();
+        boolean fast = et != null && root != null && act != null
+                && !act.isFinishing()
+                && et.isAttachedToWindow() && root.isAttachedToWindow()
+                && (cachedLoose || act == top);
+        if (fast) {
+            LOOSE = cachedLoose;
+        } else {
+            et = null;
+            act = top;
+            root = act != null && act.getWindow() != null
+                    ? act.getWindow().getDecorView() : null;
+            LOOSE = false;
+            et = root == null ? null : findEditText(root, 0);
+            if (et == null) {
+                // 相册/预览页盖在聊天页上面时，前台 Activity 没有输入框；
+                // 后台的聊天页仍然活着，直接往它的输入框里送，这是「相册里发图时插文字」的关键。
+                Activity bg = chatActivity();
+                if (bg != null && bg.getWindow() != null) {
+                    LOOSE = true;
+                    act = bg;
+                    root = bg.getWindow().getDecorView();
+                    et = findEditText(root, 0);
+                }
+            }
+            if (et != null) {
+                cachedAct = new WeakReference<>(act);
+                cachedRoot = new WeakReference<>(root);
+                cachedEt = new WeakReference<>(et);
+                cachedLoose = LOOSE;
+                cachedSend = new WeakReference<>(null);
             }
         }
         Log.i(TAG, "ui-send: act=" + (act == null ? "null" : act.getClass().getName())
                 + " edit=" + (et == null ? "null" : et.getClass().getName())
                 + " loose=" + LOOSE
+                + " fast=" + fast
                 + " content=" + shorten(content));
         if (et == null) {
             // 相册刚返回时前台可能短暂为空，等界面回来再发（最多 ~9 秒）
@@ -133,7 +170,7 @@ public final class UiSender {
                 if (retries == 1) {
                     Log.i(TAG, "ui-send: no chat input yet, retrying");
                 }
-                ui.postDelayed(UiSender::step, 300L);
+                ui.postDelayed(UiSender::step, 150L);
                 return;
             }
             Log.i(TAG, "ui-send: give up on " + shorten(content));
@@ -145,40 +182,95 @@ public final class UiSender {
                 dropped.done.run();
             }
             retries = 0;
-            ui.postDelayed(UiSender::step, 300L);
+            ui.postDelayed(UiSender::step, 150L);
             return;
         }
         retries = 0;
-        // 出队放在点击完成之后（见下方 finished），这里不能先 poll，否则每条会被消费两次
+        // 出队放在点击完成之后（见 finish），这里不能先 poll，否则每条会被消费两次
         final View froot = root;
         final EditText fet = et;
         et.setText(content);
-        ui.postDelayed(() -> {
-            CharSequence now = fet.getText();
-            boolean same = now != null && content.contentEquals(now.toString().trim());
-            if (!same && sameRetry < 2) {
-                // 零延时模式下 setText 可能还没被 TextWatcher 处理完：重来一次，绝不丢字
+        final long start = SystemClock.uptimeMillis();
+        ui.postDelayed(() -> tryClick(froot, fet, content, start,
+                start + Math.max(0, preClickMs)), 0L);
+    }
+
+    /**
+     * 尽快点「发送」：内容一落进输入框就点，最多等到 {@link #preClickMs}（原来是死等）。
+     *
+     * <p>死等的代价是每条文字固定多花 120 ms；一次 20 张图就是 2.4 秒，纯浪费。
+     */
+    private static void tryClick(View root, EditText et, String content, long start, long deadline) {
+        if (ui == null) {
+            return;
+        }
+        CharSequence now = et.getText();
+        boolean same = now != null && content.contentEquals(now.toString().trim());
+        if (!same) {
+            if (SystemClock.uptimeMillis() < deadline) {
+                ui.postDelayed(() -> tryClick(root, et, content, start, deadline), 8L);
+                return;
+            }
+            if (sameRetry < 2) {
+                // setText 可能还没被 TextWatcher 处理完：重来一次，绝不丢字
                 sameRetry++;
                 Log.i(TAG, "ui-send: content not applied yet, retry " + sameRetry);
-                fet.setText(content);
-                ui.postDelayed(UiSender::step, 40L);
+                et.setText(content);
+                final long nd = SystemClock.uptimeMillis() + Math.max(40L, preClickMs);
+                ui.postDelayed(() -> tryClick(root, et, content,
+                        SystemClock.uptimeMillis(), nd), 40L);
                 return;
             }
             sameRetry = 0;
-            boolean ok = same && clickSend(froot, fet);
-            Log.i(TAG, "ui-send: click=" + ok + " content=" + shorten(content));
-            if (!ok && dumpsLeft-- > 0) {
-                dump(froot, 0, new StringBuilder());
-            }
-            Item finished;
-            synchronized (QUEUE) {
-                finished = QUEUE.poll();
-            }
-            if (finished != null && finished.done != null) {
-                finished.done.run();
-            }
-            ui.postDelayed(UiSender::step, postClickMs);
-        }, preClickMs);
+            Log.i(TAG, "ui-send: content never applied, skip " + shorten(content));
+            finish(false, et);
+            return;
+        }
+        sameRetry = 0;
+        boolean ok = clickSend(root, et);
+        Log.i(TAG, "ui-send: click=" + ok + " in " + (SystemClock.uptimeMillis() - start)
+                + "ms content=" + shorten(content));
+        if (!ok && dumpsLeft-- > 0) {
+            dump(root, 0, new StringBuilder());
+        }
+        finish(ok, et);
+    }
+
+    /** 出队 + 回调 + 排下一条。 */
+    private static void finish(boolean ok, EditText et) {
+        Item finished;
+        synchronized (QUEUE) {
+            finished = QUEUE.poll();
+        }
+        if (finished != null && finished.done != null) {
+            finished.done.run();
+        }
+        long deadline = SystemClock.uptimeMillis() + Math.max(0, postClickMs);
+        awaitInputCleared(et, deadline);
+    }
+
+    /**
+     * 下一条要等微信把输入框清空再走，不再死等 {@link #postClickMs}。
+     *
+     * <p>点完发送微信会同步把输入框置空，清空了就立刻取下一条；只有点没生效时
+     * 才会耗满 postClickMs —— 语义与原来一致，只是快的那一半真的变快了。
+     */
+    private static void awaitInputCleared(EditText et, long deadline) {
+        if (ui == null) {
+            return;
+        }
+        boolean cleared;
+        try {
+            CharSequence now = et == null ? null : et.getText();
+            cleared = now == null || now.toString().trim().isEmpty();
+        } catch (Throwable t) {
+            cleared = true;
+        }
+        if (cleared || SystemClock.uptimeMillis() >= deadline) {
+            ui.postDelayed(UiSender::step, 0L);
+            return;
+        }
+        ui.postDelayed(() -> awaitInputCleared(et, deadline), 8L);
     }
 
     /** 当前界面是否存在可见的聊天输入框（自测轮询用，不发任何东西）。 */
@@ -365,6 +457,12 @@ public final class UiSender {
     // ------------------------------------------------------------ 点发送
 
     private static boolean clickSend(View root, EditText et) {
+        // 缓存命中就少走两遍全树（findByText + findRightOfInput 都带 getLocationOnScreen）
+        View cached = cachedSend.get();
+        if (cached != null && cached.isAttachedToWindow() && cached.isEnabled()
+                && cached.performClick()) {
+            return true;
+        }
         View btn = findByText(root, 0);
         if (btn == null) {
             btn = findRightOfInput(root, et, 0);
@@ -379,7 +477,11 @@ public final class UiSender {
         if (clickable == null) {
             clickable = btn;
         }
-        return clickable.performClick();
+        boolean ok = clickable.performClick();
+        if (ok) {
+            cachedSend = new WeakReference<>(clickable);
+        }
+        return ok;
     }
 
     /** 文字是「发送 / Send」且可见的节点（微信的发送键就是个 TextView）。 */

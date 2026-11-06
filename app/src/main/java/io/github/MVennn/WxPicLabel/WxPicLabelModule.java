@@ -26,8 +26,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import io.github.MVennn.WxPicLabel.core.ConfigKeys;
 import io.github.MVennn.WxPicLabel.feature.imglabel.AlbumMemoryToggle;
 import io.github.MVennn.WxPicLabel.feature.imglabel.FriendExporter;
+import io.github.MVennn.WxPicLabel.feature.imglabel.RecordExporter;
+import io.github.MVennn.WxPicLabel.feature.imglabel.RenameRules;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RepeatCounter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.ScopeGate;
+import io.github.MVennn.WxPicLabel.feature.imglabel.UiHud;
 import io.github.MVennn.WxPicLabel.feature.imglabel.UiSender;
 import io.github.MVennn.WxPicLabel.util.Reflect;
 
@@ -59,6 +62,8 @@ public class WxPicLabelModule extends XposedModule {
     private static final String PROP = "debug.wxpiclabel.";
 
     private final Handler main = new Handler(Looper.getMainLooper());
+    /** 是否主进程（见 onModuleLoaded）。 */
+    private volatile boolean mainProcess;
 
     private volatile ClassLoader wxLoader;
     private volatile ClassLoader realLoader;
@@ -96,16 +101,35 @@ public class WxPicLabelModule extends XposedModule {
 
     /** remote preferences（目标进程侧只读）；框架不支持时为 null，一律走默认值。 */
     private volatile SharedPreferences cfgPrefs;
+    /** 上次附着 remote preferences 的时刻（毫秒）。 */
+    private volatile long cfgAttachedAt;
+    /**
+     * 重新附着的周期。
+     *
+     * <p>目标进程侧拿到的 remote preferences 是**附着那一刻的快照**，不重取的话
+     * 模块 App 改的配置这个进程永远读不到 —— 实测「刷新名单」按钮因此长期无效
+     * （令牌写进去了，微信进程直到下次重启才「发现」它变了）。
+     */
+    private static final long CFG_TTL_MS = 3000L;
     /** 同名图片计数仓库（落在微信自己的 SharedPreferences 里）。 */
     private volatile RepeatCounter repeat;
     /** 本批「选图条目 → 要发的文字」缓存，防止同一个条目被计两次次数。 */
     private volatile IdentityHashMap<Object, String> batchTexts;
+    /** 重命名规则表缓存（原始字符串没变就复用解析结果）。 */
+    private volatile java.util.Map<String, String> renameCache;
+    private volatile String renameCacheRaw;
+    /** 已处理过的「回传发送记录」令牌。 */
+    private volatile String lastRecordDump;
 
     // ------------------------------------------------------------------ 生命周期
 
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
         log("module loaded, process=" + param.getProcessName());
+        // 主进程 = 进程名就是包名（:push / :tools 这类子进程不带 UI）。
+        // HUD 的 Toast、兜底轮询、自测通道都只在主进程跑：
+        // 子进程各弹一遍 Toast 会把系统 Toast 队列排成一串，进度永远停在 1/N。
+        mainProcess = WECHAT.equals(param.getProcessName());
     }
 
     @Override
@@ -265,8 +289,26 @@ public class WxPicLabelModule extends XposedModule {
             try {
                 hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
-                            if (!takeoverEnabled() || !featureEnabled() || !memoryOn()
-                                    || Boolean.TRUE.equals(replayGuard.get())) {
+                            try {
+                                if (!takeoverEnabled()) {
+                                    log("takeover: disabled by prop, let wechat send");
+                                    return chain.proceed();
+                                }
+                                if (!featureEnabled()) {
+                                    log("takeover: feature off, let wechat send");
+                                    return chain.proceed();
+                                }
+                                if (!memoryOn()) {
+                                    log("takeover: memory off, let wechat send");
+                                    return chain.proceed();
+                                }
+                                if (Boolean.TRUE.equals(replayGuard.get())) {
+                                    return chain.proceed();
+                                }
+                            } catch (Throwable t) {
+                                // 拦截入口的判定抛异常只能放行 —— 但必须留痕，否则
+                                // 「为什么没接管」在日志里是空白的（PROTECTIVE 模式静默吞掉）
+                                log("takeover: gate error " + t + ", let wechat send");
                                 return chain.proceed();
                             }
                             Object params = chain.getArg(pi);
@@ -359,8 +401,22 @@ public class WxPicLabelModule extends XposedModule {
     /** 后台线程逐张发：图 k → 等它发送成功 → 文件名 k → 下一张。 */
     private void startReplay(Object params) {
         takeoverUntil = System.currentTimeMillis() + 180_000L;
+
+        // 时序参数每批只读一次：longProp 每次都要 Class.forName + getMethod，
+        // 放在逐张循环里等于每张图白做几次反射
+        final long gap = longProp("gap", 0L);
+        final long intoGap = longProp("intogap", 800L);
+        final long confirmGap = longProp("confirmgap", 0L);
+        final long confirmTimeout = longProp("confirmtimeout", 12_000L);
+        final long drainMax = longProp("drainmax", 6_000L);
         UiSender.preClickMs = (int) longProp("preclick", 120L);
         UiSender.postClickMs = (int) longProp("postclick", 150L);
+
+        // ⚠️ 上一批的「连续等不到确认」绝不能带到这一批。
+        // sentMisses >= 2 会让整批都不再等事件，图片一股脑重放出去，上传全压在微信的发送队列里
+        // —— 这正是「发完图再发文字还在转圈」的来源，而且它只在一处被清零，
+        // 一旦触发，本进程后续每一批都会退化，永远不自愈。
+        sentMisses = 0;
 
         // 本批的文字缓存：同一个条目只计一次次数
         batchTexts = new IdentityHashMap<>();
@@ -368,6 +424,16 @@ public class WxPicLabelModule extends XposedModule {
         // 同时把它清掉，免得接管发完以后轮询又把同一批文字补一遍。
         final ArrayList<String> preLabels = pendingLabels;
         pendingLabels = null;
+
+        final boolean hudToast = cfgBool(ConfigKeys.IMG_LABEL_PROGRESS_TOAST,
+                ConfigKeys.DEFAULT_IMG_LABEL_PROGRESS_TOAST);
+        final boolean hudKeep = cfgBool(ConfigKeys.IMG_LABEL_KEEP_SCREEN_ON,
+                ConfigKeys.DEFAULT_IMG_LABEL_KEEP_SCREEN_ON);
+        main.post(() -> {
+            if (mainProcess) {
+                UiHud.begin(appContext(), hudToast, hudKeep);
+            }
+        });
 
         new Thread(() -> {
             List<?> origin = null;
@@ -389,30 +455,53 @@ public class WxPicLabelModule extends XposedModule {
 
                 int sent = 0;
                 List<Object> failed = new ArrayList<>();
-                for (int k = 0; k < origin.size(); k++) {
+                final int total = origin.size();
+                for (int k = 0; k < total; k++) {
                     Object entry = origin.get(k);
+                    final int idx = k + 1;
                     try {
                         ArrayList<Object> one = new ArrayList<>();
                         one.add(entry);
                         listField.set(params, one);
+                        // 计数必须在重放**之前**取：成功事件可能在上一次调用的同步段里就落地，
+                        // 基线取晚了一律白等到 confirmtimeout（历史上就是这么拖出两个 12 秒的）
+                        int base = imageSent.get();
                         replayOne();
                         sent++;
-                        waitImageSent(k + 1, origin.size());
-                        String label = preLabels != null && preLabels.size() == origin.size()
+                        if (mainProcess) {
+                            main.post(() -> {
+                                UiHud.hold(appContext());
+                                UiHud.progress(appContext(), idx, total);
+                            });
+                        }
+                        waitImageSent(base, idx, total, intoGap, confirmGap, confirmTimeout);
+                        String label = preLabels != null && preLabels.size() == total
                                 ? preLabels.get(k)
                                 : textFor(entry);
-                        if (!sendLabel(label, k + 1, origin.size())) {
-                            log("takeover: text#" + (k + 1) + " not sent");
+                        if (!sendLabel(label, idx, total)) {
+                            log("takeover: text#" + idx + " not sent");
                         }
-                        sleepQuietly(longProp("gap", 0L));
+                        sleepQuietly(gap);
                     } catch (Throwable t) {
-                        log("takeover: image#" + (k + 1) + " failed: " + t);
+                        log("takeover: image#" + idx + " failed: " + t);
                         failed.add(entry);
                     }
                 }
                 listField.set(params, origin);
+                // 这一批的文字已经由接管发完，兜底轮询别再补一遍
+                pendingLabels = null;
+                if (sentMisses > 0) {
+                    // 有没等到确认的：等微信把在途上传排空再收工，
+                    // 否则用户紧接着发的文字会排在图片上传后面转圈
+                    drainInFlight(drainMax);
+                }
+                if (mainProcess) {
+                    main.post(UiHud::end);
+                    pushRecords("batch");
+                }
                 takeoverUntil = 0L;
-                log("takeover: done, sent=" + sent + " failed=" + failed.size());
+                log("takeover: done, sent=" + sent + " failed=" + failed.size()
+                        + " misses=" + sentMisses);
                 if (!failed.isEmpty()) {
                     // 只把没发出去的交回微信，已发过的绝不重发
                     listField.set(params, failed);
@@ -472,6 +561,9 @@ public class WxPicLabelModule extends XposedModule {
             // 恢复失败也只能继续兜底
         }
         takeoverUntil = 0L;
+        if (mainProcess) {
+            main.post(UiHud::end);
+        }
         if (origin != null) {
             ArrayList<String> labels = new ArrayList<>();
             for (Object o : origin) {
@@ -482,29 +574,60 @@ public class WxPicLabelModule extends XposedModule {
         replayOriginal();
     }
 
-    /** 等这一张图真正发出去（气泡上的转圈消失）。 */
-    private void waitImageSent(int idx, int total) {
+    /**
+     * 等这一张图真正发出去（气泡上的转圈消失）。
+     *
+     * @param base 重放**之前**取的计数快照。事件有可能在 `on5.f#a` 的同步段里就落地，
+     *             基线取晚了一律白等到超时 —— 这就是历史上「两张图各卡 12 秒」的根因。
+     */
+    private void waitImageSent(int base, int idx, int total,
+                               long intoGap, long confirmGap, long confirmTimeout) {
         if (sentMisses >= 2) {
-            sleepQuietly(longProp("intogap", 0L));
+            // 退化模式：不再等事件，但也**不能零间隔** —— 零间隔会让后续每张图的上传
+            // 同时压在微信发送队列里，表现就是「图越多越慢、发完手动发文字还在转圈」
+            sleepQuietly(intoGap);
             return;
         }
         long start = System.currentTimeMillis();
-        int before = imageSent.get();
-        long deadline = start + longProp("confirmtimeout", 12_000L);
+        long deadline = start + confirmTimeout;
         while (System.currentTimeMillis() < deadline) {
-            if (imageSent.get() > before) {
+            if (imageSent.get() > base) {
                 sentMisses = 0;
                 log("takeover: image#" + idx + "/" + total + " sent-confirmed after "
                         + (System.currentTimeMillis() - start) + "ms");
-                sleepQuietly(longProp("confirmgap", 0L));
+                sleepQuietly(confirmGap);
                 return;
             }
-            sleepQuietly(60L);
+            sleepQuietly(20L);
         }
         sentMisses++;
         log("takeover: image#" + idx + "/" + total + " no send-confirm in "
                 + (System.currentTimeMillis() - start) + "ms, misses=" + sentMisses);
-        sleepQuietly(longProp("intogap", 0L));
+        sleepQuietly(intoGap);
+    }
+
+    /**
+     * 收尾排空：等到微信不再冒出新的发送成功事件为止。
+     *
+     * <p>只在「本批有没等到确认的图」时调用 —— 那些图还在上传，用户紧接着发文字
+     * 就会排在它们后面转圈。等到连续 800 ms 没有新事件（或到 max）就认为排空了。
+     */
+    private void drainInFlight(long max) {
+        long start = System.currentTimeMillis();
+        int last = imageSent.get();
+        long lastChange = start;
+        while (System.currentTimeMillis() - start < max) {
+            int now = imageSent.get();
+            if (now != last) {
+                last = now;
+                lastChange = System.currentTimeMillis();
+            } else if (System.currentTimeMillis() - lastChange > 800L) {
+                log("takeover: drain idle after " + (System.currentTimeMillis() - start) + "ms");
+                return;
+            }
+            sleepQuietly(80L);
+        }
+        log("takeover: drain timeout after " + (System.currentTimeMillis() - start) + "ms");
     }
 
     /** 发一条文件名；成功排进 UI 队列就返回 true。 */
@@ -702,9 +825,19 @@ public class WxPicLabelModule extends XposedModule {
         if (params == null || pendingLabels != null || !featureEnabled()) {
             return;
         }
+        // 接管正在跑：这一批的文字由接管逐张发，兜底队列不许插一脚。
+        // 插进来还会把 batchTexts 清掉，textFor 于是重新 bump 一次 —— 文件名会凭空 +2/+3。
+        if (System.currentTimeMillis() < takeoverUntil) {
+            return;
+        }
         // 「记忆/文件名」没勾：连文字都别算 —— RepeatCounter 在 textFor 里会 bump 次数，
         // 算了却不发，下一次发送的 +N 就凭空跳号
         if (!memoryOn()) {
+            return;
+        }
+        // 白名单外的会话根本不会补文件名，先把名单算一遍只会白白 bump 计数
+        // （实测向白名单外的会话发 6 张，+N 计数照样被顶了一次，随后兜底队列又整体丢弃）。
+        if (!scopeAllowed(lastTalker)) {
             return;
         }
         // 走到这里说明这一批没有接管（接管会先清掉 pendingLabels），
@@ -741,12 +874,17 @@ public class WxPicLabelModule extends XposedModule {
 
     /** 轮询：接管没在跑、聊天页可用、而且还有没发出去的文件名，就按间隔补发。 */
     private void startFallbackPoller() {
+        if (!mainProcess) {
+            return;
+        }
         Runnable poll = new Runnable() {
             @Override
             public void run() {
                 try {
                     flushFallback();
                     checkScopeRefresh();
+                    checkRecordDump();
+                    checkSelfTest();
                 } catch (Throwable t) {
                     log("fallback: flush failed: " + t);
                 }
@@ -754,6 +892,49 @@ public class WxPicLabelModule extends XposedModule {
             }
         };
         main.postDelayed(poll, 1200L);
+    }
+
+    // ------------------------------------------------------------------ 自测通道
+
+    /** 上一次触发的自测属性值（同一个值只跑一次，换值才再跑）。 */
+    private volatile String lastSelfTestText;
+    private volatile String lastSelfTestHud;
+
+    /**
+     * 自测通道：`debug.wxpiclabel.text <文本>` / `debug.wxpiclabel.hud <总数>`。
+     *
+     * <p>`docs/TROUBLESHOOTING.md` 第 7 节一直写着这两个属性，但代码精简那轮把触发点一起删了，
+     * 文档与实现脱节；这里补回来，顺带给本轮的发送时序优化留一个可复现入口。
+     */
+    private void checkSelfTest() {
+        String text = prop("text");
+        if (text != null && !text.isEmpty() && !text.equals(lastSelfTestText)) {
+            lastSelfTestText = text;
+            log("selftest: send text=" + text);
+            UiSender.send(main, text);
+        }
+        String hud = prop("hud");
+        if (hud != null && !hud.isEmpty() && !hud.equals(lastSelfTestHud)) {
+            lastSelfTestHud = hud;
+            int total;
+            try {
+                total = Integer.parseInt(hud.trim());
+            } catch (Throwable t) {
+                total = 3;
+            }
+            runHudSelfTest(Math.max(1, Math.min(total, 99)));
+        }
+    }
+
+    /** 自测：跑一遍进度 Toast + 屏幕常亮，不看配置开关（要验的就是这条链路本身）。 */
+    private void runHudSelfTest(int total) {
+        log("selftest: hud total=" + total);
+        main.post(() -> UiHud.begin(appContext(), true, true));
+        for (int i = 1; i <= total; i++) {
+            final int n = i;
+            main.postDelayed(() -> UiHud.progress(appContext(), n, total), i * 400L);
+        }
+        main.postDelayed(UiHud::end, (total + 1) * 400L + 1000L);
     }
 
     private void flushFallback() {
@@ -808,16 +989,25 @@ public class WxPicLabelModule extends XposedModule {
     /** remote preferences（目标进程侧只读）；框架不支持时返回 null，调用方一律走默认值。 */
     private SharedPreferences cfgPrefs() {
         SharedPreferences p = cfgPrefs;
-        if (p != null) {
+        if (p != null && System.currentTimeMillis() - cfgAttachedAt < CFG_TTL_MS) {
             return p;
         }
         try {
-            p = getRemotePreferences(ConfigKeys.GROUP);
-            cfgPrefs = p;
-            log("config: remote prefs attached");
+            SharedPreferences fresh = getRemotePreferences(ConfigKeys.GROUP);
+            if (fresh != null) {
+                if (p == null) {
+                    log("config: remote prefs attached");
+                }
+                cfgPrefs = fresh;
+                cfgAttachedAt = System.currentTimeMillis();
+                return fresh;
+            }
         } catch (Throwable t) {
-            log("config: remote prefs unavailable: " + t);
+            if (p == null) {
+                log("config: remote prefs unavailable: " + t);
+            }
         }
+        // 重取失败就沿用上一次的那份：绝不能因为一次异常把功能判成「关」
         return p;
     }
 
@@ -873,6 +1063,58 @@ public class WxPicLabelModule extends XposedModule {
         }
     }
 
+    /** 重命名规则表；原始字符串没变就复用上一次的解析结果。 */
+    private java.util.Map<String, String> renameRules() {
+        String raw = cfgStr(ConfigKeys.IMG_LABEL_RENAME_RULES,
+                ConfigKeys.DEFAULT_IMG_LABEL_RENAME_RULES);
+        java.util.Map<String, String> cached = renameCache;
+        if (cached != null && raw.equals(renameCacheRaw)) {
+            return cached;
+        }
+        java.util.Map<String, String> parsed = RenameRules.parse(raw);
+        renameCacheRaw = raw;
+        renameCache = parsed;
+        log("rename: rules=" + parsed.size());
+        return parsed;
+    }
+
+    /**
+     * 把当前计数表推回模块 App（「发送记录」页面的数据源）。
+     *
+     * <p>触发点两个：一批发完（保持页面新鲜）、设置页点「刷新」（令牌变化）。
+     */
+    private void pushRecords(String why) {
+        if (!mainProcess) {
+            return;
+        }
+        Context ctx = appContext();
+        RepeatCounter r = repeatCounter();
+        if (ctx == null || r == null) {
+            return;
+        }
+        try {
+            List<RepeatCounter.Row> rows = r.snapshot();
+            RecordExporter.push(ctx, rows, this::log);
+            log("records: snapshot " + rows.size() + " reason=" + why);
+        } catch (Throwable t) {
+            log("records: snapshot failed: " + t);
+        }
+    }
+
+    /** 设置页点了「刷新记录」就把令牌换一个新值，这里比对后回传一次。 */
+    private void checkRecordDump() {
+        String mark = cfgStr(ConfigKeys.IMG_LABEL_RECORD_DUMP,
+                ConfigKeys.DEFAULT_IMG_LABEL_RECORD_DUMP);
+        if (mark.equals(lastRecordDump)) {
+            return;
+        }
+        lastRecordDump = mark;
+        if (mark.isEmpty()) {
+            return;
+        }
+        pushRecords("token");
+    }
+
     /** 计数仓库懒加载；建不出来就返回 null（调用方按第 1 次处理）。 */
     private RepeatCounter repeatCounter() {
         RepeatCounter r = repeat;
@@ -906,6 +1148,9 @@ public class WxPicLabelModule extends XposedModule {
         if (label == null || label.isEmpty() || "unknown".equals(label)) {
             return label;
         }
+        // 重命名规则：命中就把文件名换成用户指定的文字。
+        // 放在计数之前 —— 计数键跟着**实际发出去的那段文字**走，与「认名字不认内容」一致。
+        label = RenameRules.apply(renameRules(), label);
         IdentityHashMap<Object, String> cache = batchTexts;
         if (cache != null) {
             String hit = cache.get(entry);

@@ -1,6 +1,5 @@
 package io.github.MVennn.WxPicLabel.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,7 +9,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.MVennn.WxPicLabel.R
@@ -43,8 +41,11 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
  * 发现变了就把历史整体清掉 —— 单向信号，不需要跨进程监听器。
  */
 @Composable
-internal fun ImgLabelSendScreen(onOpenScope: () -> Unit = {}) {
-    val ctx = LocalContext.current
+internal fun ImgLabelSendScreen(
+    onOpenScope: () -> Unit = {},
+    onOpenRecord: () -> Unit = {},
+    onOpenRename: () -> Unit = {},
+) {
     val scrollState = rememberScrollState()
 
     val onlySelected by rememberBoolPref(
@@ -57,7 +58,16 @@ internal fun ImgLabelSendScreen(onOpenScope: () -> Unit = {}) {
         ConfigKeys.IMG_LABEL_REPEAT_COUNT,
         ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_COUNT,
     )
-    val clearedText = stringResource(R.string.img_label_repeat_cleared)
+
+    val hudToast by rememberBoolPref(
+        ConfigKeys.IMG_LABEL_PROGRESS_TOAST,
+        ConfigKeys.DEFAULT_IMG_LABEL_PROGRESS_TOAST,
+    )
+    val hudKeepOn by rememberBoolPref(
+        ConfigKeys.IMG_LABEL_KEEP_SCREEN_ON,
+        ConfigKeys.DEFAULT_IMG_LABEL_KEEP_SCREEN_ON,
+    )
+
 
     Column(
         modifier = Modifier
@@ -86,6 +96,26 @@ internal fun ImgLabelSendScreen(onOpenScope: () -> Unit = {}) {
             )
         }
 
+        SmallTitle(stringResource(R.string.img_label_section_hud))
+        Card(modifier = Modifier.cardPadding()) {
+            GsSwitchPreference(
+                checked = hudToast,
+                onCheckedChange = { v ->
+                    ModulePreferences.edit { putBoolean(ConfigKeys.IMG_LABEL_PROGRESS_TOAST, v) }
+                },
+                title = stringResource(R.string.img_label_hud_toast_switch),
+                summary = stringResource(R.string.img_label_hud_toast_summary),
+            )
+            GsSwitchPreference(
+                checked = hudKeepOn,
+                onCheckedChange = { v ->
+                    ModulePreferences.edit { putBoolean(ConfigKeys.IMG_LABEL_KEEP_SCREEN_ON, v) }
+                },
+                title = stringResource(R.string.img_label_hud_keepon_switch),
+                summary = stringResource(R.string.img_label_hud_keepon_summary),
+            )
+        }
+
         SmallTitle(stringResource(R.string.img_label_section_repeat))
         Card(modifier = Modifier.cardPadding()) {
             GsSwitchPreference(
@@ -98,21 +128,23 @@ internal fun ImgLabelSendScreen(onOpenScope: () -> Unit = {}) {
             )
         }
 
+        SmallTitle(stringResource(R.string.img_label_section_rename))
+        Card(modifier = Modifier.cardPadding()) {
+            BasicComponent(
+                title = stringResource(R.string.rename_entry),
+                summary = stringResource(R.string.rename_entry_summary),
+                endActions = { ArrowRightIcon() },
+                onClick = onOpenRename,
+            )
+        }
+
         SmallTitle(stringResource(R.string.img_label_section_record))
         Card(modifier = Modifier.cardPadding()) {
             BasicComponent(
-                title = stringResource(R.string.img_label_repeat_clear),
-                summary = stringResource(R.string.img_label_repeat_clear_summary),
+                title = stringResource(R.string.record_entry),
+                summary = stringResource(R.string.record_entry_summary),
                 endActions = { ArrowRightIcon() },
-                onClick = {
-                    ModulePreferences.edit {
-                        putString(
-                            ConfigKeys.IMG_LABEL_REPEAT_RESET,
-                            System.currentTimeMillis().toString(),
-                        )
-                    }
-                    Toast.makeText(ctx, clearedText, Toast.LENGTH_SHORT).show()
-                },
+                onClick = onOpenRecord,
             )
         }
 

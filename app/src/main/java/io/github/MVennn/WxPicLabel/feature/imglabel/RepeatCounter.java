@@ -81,6 +81,67 @@ public final class RepeatCounter {
         }
     }
 
+    /** 一条记录：名称、发过几次、最后一次的毫秒时间戳。 */
+    public static final class Row {
+        public final String label;
+        public final int count;
+        public final long lastMs;
+
+        public Row(String label, int count, long lastMs) {
+            this.label = label;
+            this.count = count;
+            this.lastMs = lastMs;
+        }
+    }
+
+    /**
+     * 记录快照，按最后发送时间**倒序**（最近发的在最前）。
+     *
+     * <p>模块 App 跨 uid 读不到这份 prefs，所以这里只负责取值，
+     * 回传由 {@code WxPicLabelModule#pushRecords} 经 FriendBridgeProvider 完成。
+     * 任何异常返回空表 —— 记录页显示「还没有记录」，不影响发送。
+     */
+    public synchronized List<Row> snapshot() {
+        List<Row> out = new ArrayList<>();
+        if (prefs == null) {
+            return out;
+        }
+        try {
+            for (Map.Entry<String, ?> e : prefs.getAll().entrySet()) {
+                String key = e.getKey();
+                if (!key.startsWith(PREFIX)) {
+                    continue;
+                }
+                Object v = e.getValue();
+                if (!(v instanceof String)) {
+                    continue;
+                }
+                String raw = (String) v;
+                int bar = raw.indexOf('|');
+                String head = bar > 0 ? raw.substring(0, bar) : raw;
+                long ts = 0L;
+                if (bar > 0) {
+                    try {
+                        ts = Long.parseLong(raw.substring(bar + 1).trim());
+                    } catch (Throwable ignored) {
+                        ts = 0L;
+                    }
+                }
+                int n;
+                try {
+                    n = Integer.parseInt(head.trim());
+                } catch (Throwable ignored) {
+                    n = 0;
+                }
+                out.add(new Row(key.substring(PREFIX.length()), Math.max(n, 0), ts));
+            }
+            out.sort((a, b) -> Long.compare(b.lastMs, a.lastMs));
+        } catch (Throwable ignored) {
+            // 读不出来就当没有记录
+        }
+        return out;
+    }
+
     /** 令牌变了就整体清空（含旧的 __reset），再把新令牌记下来。 */
     private void applyResetIfNeeded(String resetToken) {
         String wanted = resetToken == null ? "" : resetToken;

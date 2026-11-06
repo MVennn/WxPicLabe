@@ -36,6 +36,8 @@ class FriendBridgeProvider : ContentProvider() {
     companion object {
         const val AUTHORITY = "io.github.MVennn.WxPicLabel.bridge"
         const val PATH_FRIENDS = "friends"
+        /** 发送记录（同名图片计数表）回传通道。 */
+        const val PATH_RECORDS = "records"
         const val COL_CHUNK = "chunk"
         const val COL_INDEX = "index"
         const val COL_TOTAL = "total"
@@ -49,6 +51,11 @@ class FriendBridgeProvider : ContentProvider() {
         private const val PREFS = "wxpiclabel_friends"
         private const val KEY_JSON = "friends_json"
         private const val KEY_FETCHED_AT = "fetched_at"
+        private const val KEY_RECORDS_JSON = "records_json"
+        private const val KEY_RECORDS_AT = "records_at"
+        /** 分片键前缀：好友与记录共用同一个 prefs 文件，靠前缀分开。 */
+        private const val PENDING_FRIENDS = "pending_"
+        private const val PENDING_RECORDS = "pending_r_"
     }
 
     override fun onCreate(): Boolean = true
@@ -72,9 +79,16 @@ class FriendBridgeProvider : ContentProvider() {
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? {
         ensureAllowed()
-        if (values == null || uri.lastPathSegment != PATH_FRIENDS) {
+        if (values == null) {
             return null
         }
+        val isFriends = uri.lastPathSegment == PATH_FRIENDS
+        if (!isFriends && uri.lastPathSegment != PATH_RECORDS) {
+            return null
+        }
+        val pendingPrefix = if (isFriends) PENDING_FRIENDS else PENDING_RECORDS
+        val targetKey = if (isFriends) KEY_JSON else KEY_RECORDS_JSON
+        val stampKey = if (isFriends) KEY_FETCHED_AT else KEY_RECORDS_AT
         val chunk = values.getAsString(COL_CHUNK) ?: return null
         val index = values.getAsInteger(COL_INDEX) ?: return null
         val total = values.getAsInteger(COL_TOTAL) ?: return null
@@ -84,19 +98,23 @@ class FriendBridgeProvider : ContentProvider() {
         val store = store()
         synchronized(store) {
             // 每个分片按 index 落位；最后一片到达时按序拼接成完整 JSON 全量覆盖
-            store.edit().putString("pending_$index", chunk).commit()
+            store.edit().putString(pendingPrefix + index, chunk).commit()
             if (index == total - 1) {
                 val sb = StringBuilder()
                 for (i in 0 until total) {
-                    sb.append(store.getString("pending_$i", ""))
+                    sb.append(store.getString(pendingPrefix + i, ""))
                 }
                 val now = System.currentTimeMillis()
-                val json = "{\"fetchedAt\":$now,\"friends\":[$sb]}"
+                val json = if (isFriends) {
+                    "{\"fetchedAt\":$now,\"friends\":[$sb]}"
+                } else {
+                    "{\"at\":$now,\"records\":[$sb]}"
+                }
                 val e = store.edit()
-                    .putString(KEY_JSON, json)
-                    .putLong(KEY_FETCHED_AT, now)
+                    .putString(targetKey, json)
+                    .putLong(stampKey, now)
                 for (i in 0 until total) {
-                    e.remove("pending_$i")
+                    e.remove(pendingPrefix + i)
                 }
                 e.commit()
             }
@@ -164,6 +182,42 @@ object FriendStore {
                 out.add(Entry(id, o.optString("name", id), o.optInt("kind", 0)))
             }
             Book(fetchedAt, out)
+        } catch (t: Throwable) {
+            Book(0L, emptyList())
+        }
+    }
+}
+
+/**
+ * 模块 App 侧的**发送记录**读取口（同名图片计数表）。
+ *
+ * 与 [FriendStore] 同一套做法：微信进程把计数表经 Provider 回传，
+ * 这里只读本机快照。记录不是用户配置，所以不进 remote preferences、不进备份。
+ */
+object RecordStore {
+
+    /** 一条记录：发出去的文字、发过几次、最后一次的毫秒时间戳。 */
+    data class Row(val label: String, val count: Int, val lastMs: Long)
+
+    data class Book(val at: Long, val rows: List<Row>)
+
+    fun read(context: Context): Book {
+        val sp = context.getSharedPreferences("wxpiclabel_friends", Context.MODE_PRIVATE)
+        val json = sp.getString("records_json", "") ?: ""
+        val at = sp.getLong("records_at", 0L)
+        if (json.isEmpty()) {
+            return Book(0L, emptyList())
+        }
+        return try {
+            val arr = JSONObject(json).optJSONArray("records") ?: JSONArray()
+            val out = ArrayList<Row>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val label = o.optString("label", "")
+                if (label.isEmpty()) continue
+                out.add(Row(label, o.optInt("count", 0), o.optLong("last", 0L)))
+            }
+            Book(at, out)
         } catch (t: Throwable) {
             Book(0L, emptyList())
         }

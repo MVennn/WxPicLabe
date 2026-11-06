@@ -81,6 +81,37 @@ object ConfigKeys {
      */
     const val IMG_LABEL_SCOPE_REFRESH = "img_label_scope_refresh"
 
+    /**
+     * 发送期间用系统 Toast 显示进度（`正在发送 3/12`），让用户知道还剩多少张。
+     *
+     * 目标进程要读，登记进 [SNAPSHOT_KEYS]；子参数，默认开 —— 开了总开关就是完整形态。
+     */
+    const val IMG_LABEL_PROGRESS_TOAST = "img_label_progress_toast"
+
+    /**
+     * 发送期间给当前前台 Activity 加 `FLAG_KEEP_SCREEN_ON`，整批发完自动解除。
+     *
+     * 不用 WakeLock：不需要宿主权限，Activity 销毁时系统自己回收。
+     */
+    const val IMG_LABEL_KEEP_SCREEN_ON = "img_label_keep_screen_on"
+
+    /**
+     * 重命名规则表：一行一条 `原名 -> 新名`（也接受 `=>` / `=` / 制表符）。
+     *
+     * 发图时按**文件名（去扩展名）**精确匹配，命中就用右边那段文字发出去；
+     * 没命中仍然发原名。整表存成一个字符串 —— 规则通常就几十行，
+     * 存成 String 比 StringSet 好导入导出（一行一条就是文件的全部内容）。
+     */
+    const val IMG_LABEL_RENAME_RULES = "img_label_rename_rules"
+
+    /**
+     * 「发送记录」回传令牌（毫秒时间戳）。
+     *
+     * 与清空令牌同一套单向通知：设置页每点一次「刷新」写一个新值，
+     * 微信进程轮询到变化就把计数表经 FriendBridgeProvider 推回模块 App。
+     */
+    const val IMG_LABEL_RECORD_DUMP = "img_label_record_dump"
+
 
     /**
      * 是否已阅读并同意免责声明。
@@ -177,6 +208,14 @@ object ConfigKeys {
 
     const val DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED = false
 
+    const val DEFAULT_IMG_LABEL_PROGRESS_TOAST = true
+
+    const val DEFAULT_IMG_LABEL_KEEP_SCREEN_ON = true
+
+    const val DEFAULT_IMG_LABEL_RENAME_RULES = ""
+
+    const val DEFAULT_IMG_LABEL_RECORD_DUMP = ""
+
     const val DEFAULT_DESKTOP_ICON = true
 
     /** 默认 INFO：既能看到关键链路，又不至于刷屏 */
@@ -215,7 +254,8 @@ object ConfigKeys {
     val ALL_KEYS = arrayOf(
         ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
-        DISCLAIMER_ACCEPTED,
+        IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
+        IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
         DESKTOP_ICON, LIQUID_GLASS, GLASS_EFFECT, LANGUAGE, THEME, PREDICTIVE_BACK,
         LOG_LEVEL,
     )
@@ -237,6 +277,8 @@ object ConfigKeys {
     val FEATURE_PARAM_KEYS = arrayOf(
         IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
+        IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
+        IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
     )
 
     /**
@@ -256,6 +298,8 @@ object ConfigKeys {
     val SNAPSHOT_KEYS: Set<String> = setOf(
         ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
+        IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
+        IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
         LOG_LEVEL,
     )
 
@@ -273,6 +317,10 @@ object ConfigKeys {
         IMG_LABEL_SCOPE_ONLY_SELECTED to DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED,
         IMG_LABEL_SCOPE_IDS to emptySet<String>(),
         IMG_LABEL_SCOPE_REFRESH to "",
+        IMG_LABEL_PROGRESS_TOAST to DEFAULT_IMG_LABEL_PROGRESS_TOAST,
+        IMG_LABEL_KEEP_SCREEN_ON to DEFAULT_IMG_LABEL_KEEP_SCREEN_ON,
+        IMG_LABEL_RENAME_RULES to DEFAULT_IMG_LABEL_RENAME_RULES,
+        IMG_LABEL_RECORD_DUMP to DEFAULT_IMG_LABEL_RECORD_DUMP,
         DESKTOP_ICON to DEFAULT_DESKTOP_ICON,
         LIQUID_GLASS to DEFAULT_LIQUID_GLASS,
         GLASS_EFFECT to DEFAULT_GLASS_EFFECT,

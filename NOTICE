@@ -10,16 +10,83 @@ Third-party components
 
 This product incorporates third-party software under the following licenses:
 
-- libxposed API (io.github.libxposed:api)
+- LSPosed / libxposed (io.github.libxposed:api, :annotation, :service)
   https://github.com/libxposed/api
   Licensed under the Apache License, Version 2.0.
-  Used as compileOnly: the artifact is NOT distributed in the APK; the
-  framework API is provided at runtime by LSPosed.
+  The api and annotation artifacts are used as compileOnly and are not
+  distributed in the APK; the service artifact is distributed with this APK
+  (Apache-2.0 §4: its copyright and license notices are retained in this file).
 
-- Android Gradle Plugin / Gradle
-  https://developer.android.com/build
+- Miuix (miuix-kotlin-multiplatform)
+  https://github.com/miuix-kotlin-multiplatform/miuix
   Licensed under the Apache License, Version 2.0.
-  Build-time only; not distributed in the APK.
+  Used for the settings UI (top.yukonga.miuix.kmp:miuix-ui, :miuix-preference).
+
+- AndroidLiquidGlass / backdrop (io.github.kyant0:backdrop)
+  https://github.com/Kyant0/AndroidLiquidGlass
+  Licensed under the Apache License, Version 2.0.
+  Used for the liquid-glass top bar, floating dock and dialog blur/refraction.
+
+- Jetpack Compose / AndroidX
+  https://developer.android.com/jetpack/compose
+  Licensed under the Apache License, Version 2.0.
+  androidx.activity:activity-compose, androidx.core:core-ktx and the Compose
+  runtime/UI/foundation/material artifacts shipped by the Compose BOM.
+
+- Kotlin (JetBrains)
+  https://github.com/JetBrains/kotlin
+  Licensed under the Apache License, Version 2.0.
+  Implementation language; the Kotlin standard library is distributed with
+  this APK.
+
+- Material Design Icons (path data)
+  https://github.com/google/material-design-icons
+  Licensed under the Apache License, Version 2.0.
+  Vector path data is copied by hand into ui/AppIcons.kt; no icon library is
+  bundled.
+
+- HyperIsland (1812z) — About page
+  https://github.com/1812z/HyperIsland
+  Licensed under the MIT License, full text below.
+  app/src/main/java/io/github/MVennn/WxPicLabel/ui/AboutHero.kt and the layout
+  structure of AboutTab.kt are derived from HyperIsland's
+  compose/page/AboutPage.kt. The logo mark in res/drawable/ic_about_mark.xml
+  follows the shape language of its about_logo_mark.xml. Modifications: our own
+  logo geometry, miuix 0.9.3 compatible mark tinting (gradient mask instead of
+  miuix-blur), Chinese copy.
+
+  MIT License
+
+  Copyright (c) 2026 1812z
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+==============================================================================
+Acknowledgements
+
+Three further debts are already covered by the component list above:
+
+- ui/GsSwitch.kt follows Miuix's Switch implementation.
+- ui/LiquidPhysics.kt is ported from AndroidLiquidGlass.
+- ui/AboutHero.kt / ui/AboutTab.kt share their structure with the sibling
+  project GSAuxiliary (same author), which in turn derived them from
+  HyperIsland.
 
 ==============================================================================
 Notes

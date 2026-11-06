@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.MVennn.WxPicLabel"
         minSdk = 27
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         buildConfigField("String", "MIUIX_VERSION", "\"$miuixVersion\"")
         buildConfigField("String", "BUILD_TIME", "\"" + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date()) + "\"")
         ndk {

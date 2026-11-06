@@ -71,12 +71,15 @@
 ## 7. 不想每次去相册点选，怎么单测发送链路
 
 ```sh
-# 只测发送：进入任意聊天界面即触发一次
-adb shell su -c "setprop debug.wxpiclabel.text 测试文本"
+# 只测发送：进入任意聊天界面即触发一次（走真实 UiSender 链路）
+adb shell setprop debug.wxpiclabel.text 测试文本
 
-# 测完整批次：合成一次选图返回（abc,def 会被拆成两个文件名）
-adb shell su -c "setprop debug.wxpiclabel.album abc,def"
+# 跑一遍进度 Toast + 屏幕常亮，不真正发东西
+adb shell setprop debug.wxpiclabel.hud 5
+
+# 关掉接管，强制走兜底链路
+adb shell setprop debug.wxpiclabel.takeover 0
 ```
 
-验收日志：`batch start: N images` → `send label[i]=... ok=true` → `ui-send: click=true`。
-属性重启失效；同一个值只触发一次，换值需要重启微信或重启设备。
+验收日志：`takeover: entries=N` → `takeover: image#k/N sent-confirmed` → `ui-send: click=true` → `takeover: done, misses=0`。
+属性重启失效；同一个值只触发一次，换值再触发。`text` / `hud` 只在主进程生效。

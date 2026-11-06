@@ -8,12 +8,11 @@
 
 | 文档 | 一句话定位 |
 | --- | --- |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 模块架构：四个 Hook 点、批次与绑定规则、降级策略、待适配清单 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 模块架构：四个 Hook 点、接管链路与现场提示、重命名与记录通道、降级策略、待适配清单 |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 排错手册：按「现象 → 步骤 → 原因 / 解法」组织 |
 | [SEND-DESIGN.md](SEND-DESIGN.md) | 发送方案：内部发送面（f9/g9/b3/MsgQuoteItem）实测清单与 A/B 方案对比 |
 | [IMG-LABEL-SEND-SETTINGS.md](IMG-LABEL-SEND-SETTINGS.md) | 发送设置：同一张图重复发送追加 +2/+3 的计数存储、开关层级与改动清单 |
 | [IMG-LABEL-CHAT-SCOPE.md](IMG-LABEL-CHAT-SCOPE.md) | 会话白名单：只对勾选的好友/群聊生效，talker 取法与好友列表抓取通道 |
-| [ALBUM-FILENAME-BUTTON.md](ALBUM-FILENAME-BUTTON.md) | 相册「文件名」开关：原图右边的注入点、布局避坑、显隐规则与三道闸 |
 | [ALBUM-FILENAME-BUTTON.md](ALBUM-FILENAME-BUTTON.md) | 相册「文件名」开关：原图右边的注入点、布局避坑、显隐规则与三道闸 |
 
 ## 二、流程与规范

@@ -193,3 +193,40 @@ SmallTitle「记录」
 
 **包路径变更**：落地时 `RepeatCounter` 在包根；随后并行会话把模块 Java 收进了 `feature/imglabel/`（`RepeatCounter` / `UiSender`），`Reflect` 进了 `util/`。包名与 import 已同步，`build.cmd` 编译通过。
 
+## 11. 同页新增的「重命名规则」与「发送记录」（2026-11-06）
+
+两个新的三级页（都是发送设置的子页）：
+
+### 重命名规则（`ui/ImgLabelRenameScreen.kt`）
+
+- 一行一条 `原名 -> 新名`，也接受 `=>` / `=` / 制表符；`#` 开头是注释。
+- 按**文件名（去扩展名）**精确匹配，命中就把发出去的文字换成右边那段；
+  计数键跟着新名字走（与「认名字不认内容」一致）。
+- 解析在微信进程侧做（`feature/imglabel/RenameRules.java`），每批一次、失败发原名。
+- 配置键 `img_label_rename_rules`（String，整表一个字符串）—— 一行一条就是文件的全部内容，
+  比多行的 StringSet 好导入导出。
+- 页面：多行文本框 + 保存 / 从文件导入 / 导出到文件 / 复制 / 粘贴。
+  导入导出走 SAF（`OpenDocument` / `CreateDocument`），导出文件名默认 `wxpiclabel-rename.txt`。
+
+### 发送记录（`ui/ImgLabelRecordScreen.kt`）
+
+- 计数表在微信进程自己的 prefs 里（跨 uid 读不到），所以列表靠回传：
+  设置页写令牌 `img_label_record_dump` → 微信进程轮询到变化 →
+  `RepeatCounter#snapshot()` → `RecordExporter#push` → FriendBridgeProvider `/records` →
+  模块 App `RecordStore` 落盘。每批发完也会推一份。
+- 页面：记录数 + 更新时间 + 列表（文字 / 第 N 次 / 最后发送时间）+ 清空发送记录。
+  清空沿用原令牌；回传时微信进程会先应用清空，所以列表立即变空。
+
+## 10. 同页新增的「发送提示」开关（2026-11-06）
+
+同一张二级页后来又加了两个开关，键与默认值都按 §4.3 的层级登记：
+
+| 开关 | 键 | 默认 | 关掉的效果 |
+| --- | --- | --- | --- |
+| 发送进度提示 | `img_label_progress_toast` | `true` | 发图批次不再弹系统 Toast |
+| 发送期间屏幕常亮 | `img_label_keep_screen_on` | `true` | 批次期间不加 `FLAG_KEEP_SCREEN_ON` |
+
+- 实现跑在微信进程的 `feature/imglabel/UiHud.java`，只在主进程生效（子进程各弹一个会把 Toast 队列排死）。
+- Toast 复用同一个实例 `setText` + `show` 原地更新「正在发送 3/12」，不复用会排一长串。
+- 两个键都已登记 `ALL_KEYS` / `FEATURE_PARAM_KEYS` / `SNAPSHOT_KEYS` / `DEFAULTS`（漏 `SNAPSHOT_KEYS` 会静默失效）。
+

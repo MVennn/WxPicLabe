@@ -235,7 +235,7 @@ public final class FriendExporter {
     }
 
     /** 最小 JSON 字符串转义：引号、反斜杠与控制字符。 */
-    private static String jsonEscape(String s) {
+    static String jsonEscape(String s) {
         if (s == null) {
             return "";
         }

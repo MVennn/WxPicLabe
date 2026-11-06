@@ -2,6 +2,74 @@
 
 > **一句话**：本仓任务与验收记录，按批次追加。
 
+## 2026-11-06 · 重命名规则 + 发送记录 + 三层路由（完成）
+
+**需求（用户）**：记录要能看；重命名要能「一行一条」自己加载；要能导入导出；三级页回二级页的可预测返回动画有问题。
+
+**改动**
+- `feature/imglabel/RenameRules.java`（新）：一行一条 `原名 -> 新名`，接受 `=>` / `=` / 制表符，`#` 注释；按文件名精确匹配，解析失败发原名
+- `WxPicLabelModule.java`：`textFor` 在计数前套规则；`renameRules()` 按原始字符串缓存解析结果；`pushRecords()` + `checkRecordDump()`（令牌轮询）+ 每批发完推一份；拦截入口的三个判定加留痕日志（原来被 PROTECTIVE 静默吞掉）
+- `RepeatCounter.java`：新增 `Row` 与 `snapshot()`（按最后发送时间倒序）
+- `feature/imglabel/RecordExporter.java`（新）：计数表分片回传 `content://…bridge/records`
+- `app/FriendBridgeProvider.kt`：insert 支持 `friends` / `records` 两条通道（分片键前缀分开）；新增 `RecordStore`
+- `ui/ImgLabelRenameScreen.kt`（新）：多行编辑器 + 保存 / 从文件导入（SAF OpenDocument）/ 导出到文件（SAF CreateDocument）/ 复制 / 粘贴
+- `ui/ImgLabelRecordScreen.kt`（新）：记录数 + 更新时间 + 列表（文字 / 第 N 次 / 时间）+ 清空
+- `ui/ImgLabelSendScreen.kt`：新增「重命名」「发送记录」两个入口，清空动作挪进记录页
+- `ui/Routing.kt`：重写为**三层 + 两条独立进度**（`subProgress` / `editProgress`），可预测返回只推最上面那一层；进度仍在 `graphicsLayer` lambda 里读，保住上一版的滑动性能
+- `core/ConfigKeys.kt`：`img_label_rename_rules` / `img_label_record_dump`（进 ALL_KEYS / FEATURE_PARAM_KEYS / SNAPSHOT_KEYS / DEFAULTS）
+
+**验证（MuMu Android 12 / 微信 8.0.80 / release 包）**
+- 重命名端到端：规则 `RENAMED_OK->RENAMED_TEST_OK` → 发该图 → 日志 `repeat: label=RENAMED_TEST_OK count=1` → `takeover: text#1/1 label=RENAMED_TEST_OK`，聊天里收到的就是改名后的文字
+- 记录页：`共 8 条记录`，列出 `RENAMED_TEST_OK 第 1 次 · 11-06 14:03`、`臻宝科技 688797 第 13 次` 等（uiautomator dump 实证）
+- 三级页导航：发送设置 → 重命名规则 / 发送记录 进出正常（Android 12 无 predictive back，手势动画按 GSAuxiliary 已验证的实现移植，待 Android 13+ 真机确认）
+- `build.cmd testDebugUnitTest` 6/6 绿；`check-docs.py` / `check-secrets.py` 全绿
+
+## 2026-11-06 · 选择好友与群聊交互修整 + 配置通道修复（完成）
+
+**现象（用户报）**：`已选 X 个` 点了没反应；好友名单要手动点才刷新。
+
+**真因（两处，第二处比表象深）**
+1. `ScopePickerScreen` 顶卡把「刷新」当成点击动作，没有任何可见反馈
+2. **目标进程侧 remote preferences 是附着那一刻的快照**：模块 App 写入的刷新令牌，微信进程读一万次都是旧值 —— 「刷新名单」按钮自上线起就没有在运行期生效过（唯一生效时机是微信重启后的第一次轮询，`lastScopeRefresh` 初始为空）
+
+**改动**
+- `ui/ScopePickerScreen.kt`：顶卡点击展开**已选名单**（显示勾了谁、点行即取消）；进页自动写令牌并轮询回传（fetchedAt 变了就停，上限 ~30 s）；新增独立「刷新名单」行（刷新中 / 常态两种摘要）；摘要加「名单更新于 MM-dd HH:mm」
+- `WxPicLabelModule.java`：`cfgPrefs()` 按 3 s TTL 重附着拿新快照；重取失败沿用上一份（fail-closed 的 `feature_img_label` 不能因为一次异常被关掉）
+- 中英文案 5 条（`scope_refresh_entry` / `scope_refresh_summary` / `scope_refreshing` / `scope_selected_empty` / `scope_updated_at`）
+
+**验证（MuMu Android 12 / 微信 8.0.80 / release 包）**
+- 进页自动刷新：微信进程 **1 秒内** `friends: refresh token changed, re-sync` → `fetched 55`（修复前写令牌后 3 分钟零反应）
+- 选择页摘要显示 `共 55 个会话 · 名单更新于 11-06 13:21`；点顶卡展开已选名单（uiautomator dump：`Adam.` / `wxid_fvun2vlk6x9n22` 出现在卡片内，y=252/282），点行即取消勾选
+- `刷新名单` 行刷新中显示「正在刷新名单…」，完成后回到常态摘要
+- `build.cmd release` 45 s 成功；`check-docs.py` 16 篇全绿
+
+**连带收益**：配置改动不再需要重启微信 —— 所有开关（发送提示 / 常亮 / 重复计数 / 白名单）3 s 内在微信进程生效
+
+## 2026-11-06 · 实机发图体验优化 + 发送提示（完成）
+
+**现象（用户报）**：图文一组发完接下一组慢、图越多越明显；发完图片任务后手动发文字还在转圈；要进度 Toast 与屏幕常亮。
+
+**根因（真机日志实证）**
+- `sentMisses` 只在等待成功时清零、`startReplay` 不重置 → 两张 miss 后整批不再等事件，**此后每一批都退化且永不自愈**（PITFALLS 16）
+- `waitImageSent` 的计数快照取在 `replayOne()` **之后**，事件在同步段落地就白等满 12 s（PITFALLS 17）
+- `armFromParams` 先 bump 计数再由兜底轮询做白名单判定 → 名单外会话白涨 +N（PITFALLS 18）
+- `UiSender` 每条文字走 3~4 遍全树递归（主线程 O(视图数)），且死等 preclick 120 ms + postclick 150 ms
+
+**改动**
+- `UiSender.java`：输入框/发送键按 Activity 实例缓存（fast 路径）；点击自适应（内容落框就点、点完等输入框被清空就走）；日志加 `fast=` 与耗时
+- `WxPicLabelModule.java`：每批 `sentMisses=0`；快照前置到 `replayOne()` 前；`intogap` 默认 0→800 ms；`misses>0` 收尾 `drainInFlight`；接 `UiHud`（仅主进程）；`armFromParams` 先过白名单；恢复自测 `text`、新增 `hud`；时序属性每批只读一次
+- `UiHud.java`：Toast 复用实例原地更新「正在发送 k/N」+ `FLAG_KEEP_SCREEN_ON`，双开关，结束自动解除
+- `core/ConfigKeys.kt`：新增 `img_label_progress_toast` / `img_label_keep_screen_on`（默认开，登记四张表）；顺带把仍在 `ALL_KEYS` 里的 `disclaimer_accepted` 移出（PITFALLS 15 声称已移除，实际漏了一处，单测红灯抓出来的）
+- `ui/ImgLabelSendScreen.kt` + 中英文案：「发送提示」分组两个开关
+
+**验证（MuMu Android 12 / 微信 8.0.80，adb 127.0.0.1:16416）**
+- `build.cmd testDebugUnitTest` 6/6 绿（改前 2 红：`disclaimer_accepted` 还在 ALL_KEYS）
+- 6 张图文 34.79→41.80 = **7.0 s（1.17 s/组）**，`misses=0`，每条文字 `click=true in 9~13ms fast=true`；截图 `.work/run-2.png` 图/字严格交替 + Toast「正在发送 4/6」
+- 批次结束 0.98 s 后自测发文字 `click=true in 9ms`，聊天里无转圈（`.work/after-batch.png`）
+- HUD 自测 `setprop debug.wxpiclabel.hud 12`：Toast 上屏（`.work/hud-e.png`），`dumpsys notification` Toast Queue 单条且文本 1/20→13/20 原地更新；`keep-screen-on/off` 成对出现
+- 白名单外会话发 2 张：只有 `not in scope, let wechat send`，无 `repeat:` 行（修复前会白涨 6 次计数）
+- 模块日志：`takeover: done, sent=6 failed=0 misses=0`
+
 ## 2026-11-06 · 相册「文件名」开关（完成，随 v0.3.0 发版）
 
 **需求**：微信相册选图页「原图」右边加一个同款开关「文件名」，勾着才补文件名、不勾就微信原生发送；显隐跟随功能总开关与会话白名单；退出相册 / 重启微信不复位。

@@ -91,3 +91,28 @@
 - **现象**：备份 JSON 里出现 `disclaimer_accepted: true`；换机恢复后首次启动不弹免责声明，看起来像「免责声明失效」。
 - **根因**：`DISCLAIMER_ACCEPTED` 被登记进 `ConfigKeys.ALL_KEYS` 与 `DEFAULTS`，于是它跟着备份 / 恢复 / `resetToDefaults()` 一起走。但它其实是**本机界面状态**，不是模块配置。
 - **怎么避**：`ALL_KEYS` / `DEFAULTS` 都不收它，只走本地文件（`getLocalBoolean` / `setLocalBoolean`）；顺带解决「重置模块把同意态一起清掉、每重置一次就要再点一次同意」的问题。判据：**与目标进程无关、且「清除应用数据就该重置」的状态，一律不进配置表**。
+
+## 16. 一批里有两张等不到确认，之后每一批都不再等
+- **现象**：某批发图有两张气泡转圈超过 `confirmtimeout`（12 s），之后**所有**批次都不再等事件，剩余图片一股脑重放出去；表现是「图越多越慢，发完手动发文字还在转圈」，且永不自愈。
+- **根因**：`sentMisses` 只在等待**成功**时清零，`startReplay` 从不重置 —— 累计到 2 之后，后续每一批的 `waitImageSent` 直接走退化分支。
+- **怎么避**：每批开始把 `sentMisses` 归零（`WxPicLabelModule#startReplay`）；退化模式不再零间隔（`intogap` 默认 800 ms），宁可慢也别把上传堆进微信发送队列；批次收尾若本批有 miss，`drainInFlight` 等上传排空再撒手。
+
+## 17. 成功事件被算进基线，每张图白等到 12 秒
+- **现象**：个别批次每张图都卡满 `confirmtimeout`，日志两条 `no send-confirm ... misses=1/2`，图文顺序却是对的。
+- **根因**：`waitImageSent` 的计数快照取在 `replayOne()` **之后**；`on5.f#a` 的同步段里 `xm5.y#Fj` 就可能落地，快照取晚了一律等不到「下一次」。
+- **怎么避**：快照必须在**重放之前**取；轮询间隔 60 ms → 20 ms，事件早到也能立刻识别。
+
+## 18. 白名单外的会话发图，+N 计数照样被顶
+- **现象**：给白名单外的会话发 N 张图，日志先出 N 条 `repeat: label=… count=…`，随后 `fallback: … not in scope, drop N` —— 图是微信原生发的，计数却被白涨一次。
+- **根因**：`armFromParams` 先 `textFor()`（bump 计数）再由 `flushFallback` 做白名单判定。
+- **怎么避**：`armFromParams` 在算名单前先过 `scopeAllowed(lastTalker)`，名单外直接放弃。
+
+## 19. 子进程各弹一个 Toast，进度永远停在 1/N
+- **现象**：`dumpsys notification` 的 Toast Queue 里出现 3 条同名进度 Toast（分别来自 `com.tencent.mm` 的三个进程），屏幕反复显示 1/N。
+- **根因**：钩子装在每个进程里，HUD 的 begin/progress 没按进程区分；每个进程一条 Toast 记录，排队依次显示。
+- **怎么避**：`onModuleLoaded` 里按 `processName == 包名` 记主进程，HUD、兜底轮询、自测通道只在主进程跑。
+
+## 20. 模块 App 改了配置，微信进程永远读不到新值
+- **现象**：「刷新名单」按钮写了令牌，微信进程 3 分钟内毫无反应；只有重启微信后那一次轮询会「发现」令牌变了（`lastScopeRefresh` 初始为空）。
+- **根因**：目标进程侧 `getRemotePreferences()` 拿到的是**附着那一刻的快照**，模块 App 后续的写入不会推给已附着的那份 —— 读一万次都是旧值。
+- **怎么避**：`cfgPrefs()` 按 TTL（3 s）重新附着拿新快照；重取失败沿用上一份，**绝不能**因为一次异常把功能判成「关」（`feature_img_label` 是 fail-closed）。

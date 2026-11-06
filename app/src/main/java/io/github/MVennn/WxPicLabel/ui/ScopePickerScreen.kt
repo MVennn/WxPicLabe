@@ -1,5 +1,6 @@
 package io.github.MVennn.WxPicLabel.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +23,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import io.github.MVennn.WxPicLabel.R
 import io.github.MVennn.WxPicLabel.app.FriendStore
 import io.github.MVennn.WxPicLabel.app.ModulePreferences
@@ -48,15 +52,32 @@ internal fun ScopePickerScreen() {
     val selected by rememberStringSetPref(ConfigKeys.IMG_LABEL_SCOPE_IDS, emptySet())
     var book by remember { mutableStateOf(FriendStore.read(ctx)) }
     var query by remember { mutableStateOf("") }
+    /** 名单刷新计数：>0 表示第几次请求，拿它当 LaunchedEffect 的 key 才能重复触发。 */
+    var refreshTick by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
+    /** 「已选名单」展开态：默认收起，点一下展开看勾了谁。 */
+    var expanded by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
-    // 点了刷新后轮询几次，等微信进程把新名单回传过来
-    LaunchedEffect(refreshing) {
-        if (!refreshing) return@LaunchedEffect
-        repeat(12) {
+    fun requestRefresh() {
+        ModulePreferences.edit {
+            putString(ConfigKeys.IMG_LABEL_SCOPE_REFRESH, System.currentTimeMillis().toString())
+        }
+        refreshTick++
+    }
+
+    // 进页自动刷一次：名单是微信进程的运行时快照，进来就该拿最新的，不再依赖手动点。
+    LaunchedEffect(Unit) { requestRefresh() }
+
+    // 刷新轮询：等微信进程回传，fetchedAt 变了就停（最多 ~30 s；微信没在跑就等下次进页再刷）
+    LaunchedEffect(refreshTick) {
+        if (refreshTick == 0) return@LaunchedEffect
+        val baseline = book.fetchedAt
+        refreshing = true
+        repeat(45) {
             delay(700)
             book = FriendStore.read(ctx)
+            if (book.fetchedAt != baseline) return@repeat
         }
         refreshing = false
     }
@@ -75,6 +96,22 @@ internal fun ScopePickerScreen() {
         ModulePreferences.edit { putStringSet(ConfigKeys.IMG_LABEL_SCOPE_IDS, next) }
     }
 
+    // 「已选名单」按名单顺序展示；名单里查不到的（改名 / 已删除的会话）原样显示 id
+    val selectedEntries = remember(selected, book) {
+        val known = book.entries.filter { selected.contains(it.id) }
+        val unknown = selected
+            .filter { id -> book.entries.none { it.id == id } }
+            .map { FriendStore.Entry(it, it, 0) }
+        known + unknown
+    }
+    val updatedAt = remember(book.fetchedAt) {
+        if (book.fetchedAt == 0L) {
+            ""
+        } else {
+            SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(book.fetchedAt))
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -88,15 +125,41 @@ internal fun ScopePickerScreen() {
                 summary = if (book.fetchedAt == 0L) {
                     stringResource(R.string.scope_empty_hint)
                 } else {
-                    stringResource(R.string.scope_total_count, book.entries.size)
+                    stringResource(R.string.scope_total_count, book.entries.size) +
+                        " · " + stringResource(R.string.scope_updated_at, updatedAt)
                 },
                 endActions = { ArrowRightIcon() },
-                onClick = {
-                    ModulePreferences.edit {
-                        putString(ConfigKeys.IMG_LABEL_SCOPE_REFRESH, System.currentTimeMillis().toString())
+                onClick = { expanded = !expanded },
+            )
+            AnimatedVisibility(expanded) {
+                Column {
+                    if (selectedEntries.isEmpty()) {
+                        CardNote(stringResource(R.string.scope_selected_empty))
+                    } else {
+                        selectedEntries.forEach { e ->
+                            BasicComponent(
+                                title = e.name,
+                                summary = e.id,
+                                endActions = { SelectedMark() },
+                                onClick = { toggle(e.id) },
+                            )
+                        }
                     }
-                    refreshing = true
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Card(modifier = Modifier.cardPadding()) {
+            BasicComponent(
+                title = stringResource(R.string.scope_refresh_entry),
+                summary = if (refreshing) {
+                    stringResource(R.string.scope_refreshing)
+                } else {
+                    stringResource(R.string.scope_refresh_summary)
                 },
+                endActions = { ArrowRightIcon() },
+                onClick = { requestRefresh() },
             )
         }
 

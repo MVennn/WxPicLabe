@@ -55,9 +55,16 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
 - **接管入口**：`on5.f#a`，参数里同时有 `qa0.k` 与 `Runnable` 的那个重载。
 - **重放服务**：`db0.u#Vj` 的实例由微信自己的服务定位器 `fi5.n0#c(Class)` 取出。
 - **发送成功信号**：`xm5.y#Fj(f9)`，按 `getType()==3` 判定图片。连续两张等不到就退回固定间隔。
+- **重命名**：`feature/imglabel/RenameRules.java`，一行一条 `原名 -> 新名`（也接受 `=>` / `=` / 制表符），
+  按**文件名（去扩展名）**精确匹配，命中就用右边那段文字发出去；解析在微信进程侧、每批一次。
+- **现场提示**：`feature/imglabel/UiHud.java`，主线程复用同一个系统 Toast 显示 `正在发送 3/12`，
+  并给前台 Activity 加 `FLAG_KEEP_SCREEN_ON`（整批发完自动解除）；两个开关
+  `img_label_progress_toast` / `img_label_keep_screen_on`，只在主进程跑（见 `docs/PITFALLS.md` 第 19 条）。
 - **文字通道**：`feature/imglabel/UiSender.java`，从 `ActivityThread.mActivities` 取当前 Activity，
   在 decor view 里找可见 `EditText`（`MMEditText`）→ `setText` → 点文字为「发送」的可见 `TextView`。
   内部串行队列：一条点完再取下一条，否则后一条 `setText` 会覆盖前一条。
+  输入框 / 发送键按 Activity 实例缓存，命中就不再走全树递归（主线程 O(视图数)）；
+  点击时机自适应——内容一落进输入框就点，不再死等 `preclick`，点完等输入框被清空就取下一条。
 
 ## 兜底队列
 
@@ -72,9 +79,14 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
 ## 配置与计数
 
 - 配置读的是 libxposed 的 remote preferences（目标进程侧**只读**），框架不可用时一律走 `ConfigKeys` 的默认值。
+  目标进程拿到的是**附着那一刻的快照**，`cfgPrefs()` 每 3 s 重附着一次才能看到模块 App 的新写入
+  （否则「刷新名单」这类单向令牌永远不生效，见 `docs/PITFALLS.md` 第 20 条）；重取失败沿用上一份。
 - 同名图片计数存在**微信进程自己的** SharedPreferences（`wxpiclabel_repeat.xml`）：
   remote preferences 写不进去、模块 App 的目录跨 uid 不可写，这是唯一能落盘的地方。
 - 「清空发送记录」是**单向令牌**：设置页写一个毫秒时间戳，微信进程每次计数前比对，变了就整体清空。
+- **发送记录查看**走另一条单向令牌（`img_label_record_dump`）：设置页写令牌 → 微信进程轮询到变化就把
+  计数表经 FriendBridgeProvider 的 `/records` 回传（同一条分片协议），模块 App 的 `RecordStore` 落盘、
+  「发送记录」页展示。每批发完也会推一份，保证页面数据新鲜。
 
 ## 降级策略
 
@@ -87,15 +99,28 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
 设置系统属性后进入聊天界面即可触发，不需要真的去相册选图：
 
 ```sh
-# 直接发一条文字
-adb shell su -c "setprop debug.wxpiclabel.text hello"
+# 直接发一条文字（走真实 UiSender 链路：找输入框 → setText → 点发送）
+adb shell setprop debug.wxpiclabel.text hello
 
-# 合成一次选图返回（走真实 key 与完整批次逻辑）
-adb shell su -c "setprop debug.wxpiclabel.album 图A,图B,图C"
+# 跑一遍进度 Toast + 屏幕常亮（N = 步数，每步 400ms）
+adb shell setprop debug.wxpiclabel.hud 5
 
 # 关掉接管，强制走兜底链路
-adb shell su -c "setprop debug.wxpiclabel.takeover 0"
+adb shell setprop debug.wxpiclabel.takeover 0
 ```
+
+属性同一取值只触发一次，换值再触发；`text` / `hud` 只在主进程生效。
+
+## 时序参数（排障用）
+
+| 属性 | 默认 | 含义 |
+| --- | --- | --- |
+| `debug.wxpiclabel.preclick` | 120 ms | 点击「发送」前最多等多久（自适应，内容落进输入框就点） |
+| `debug.wxpiclabel.postclick` | 150 ms | 点击后最多等多久取下一条（输入框被清空就提前走） |
+| `debug.wxpiclabel.confirmtimeout` | 12000 ms | 等单张发送成功事件的上限 |
+| `debug.wxpiclabel.intogap` | 800 ms | 连续两次等不到事件后的固定间隔（退化模式，不许为 0） |
+| `debug.wxpiclabel.gap` / `confirmgap` | 0 ms | 重放间隔 / 确认后的间隔 |
+| `debug.wxpiclabel.drainmax` | 6000 ms | 批次收尾等在途上传排空的上限 |
 
 ## 已知限制
 
