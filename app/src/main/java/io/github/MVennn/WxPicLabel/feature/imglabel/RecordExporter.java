@@ -47,13 +47,13 @@ public final class RecordExporter {
      * @param events 逐次发送台账（按时间正序），可为 null
      * @param edited 最近一次已应用的手工修改令牌，空串表示还没应用过
      */
-    public static void push(Context ctx,
-                           List<RepeatCounter.Row> rows,
-                           List<RepeatCounter.Event> events,
-                           String edited,
-                           FriendExporter.Logger log) {
+    public static boolean push(Context ctx,
+                              List<RepeatCounter.Row> rows,
+                              List<RepeatCounter.Event> events,
+                              String edited,
+                              FriendExporter.Logger log) {
         if (ctx == null) {
-            return;
+            return false;
         }
         try {
             String doc = buildDoc(rows, events, edited);
@@ -79,8 +79,12 @@ public final class RecordExporter {
             int evCount = events == null ? 0 : events.size();
             log.log("records: pushed " + rowCount + " row(s) / " + evCount
                     + " event(s) in " + total + " chunk(s)");
+            return true;
         } catch (Throwable t) {
+            // 失败必须让调用方知道：模块 App 的 provider 被系统冻住时这里会抛，
+            // 一次失败就再也不推的话，记录页会永远是旧数据
             log.log("records: push failed: " + t);
+            return false;
         }
     }
 

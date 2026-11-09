@@ -423,6 +423,27 @@ internal fun ImgLabelRecordScreen() {
             )
         }
 
+        // ---- 诊断行：拿不到记录时要立刻说清是哪一环断了（没回传 / 解析失败 / 旧版文档），
+        //      而不是只给一个空白列表。这条也是用户反馈「读不出来」时的第一手证据。
+        val err = book.error
+        val diag = when {
+            refreshing -> null
+            err != null -> stringResource(R.string.record_diag_error, err)
+            book.at == 0L -> stringResource(R.string.record_diag_waiting)
+            !book.hasEvents && book.rows.isNotEmpty() -> stringResource(R.string.record_diag_legacy)
+            else -> stringResource(R.string.record_diag_ok, book.chars, book.rows.size, live.size)
+        }
+        if (diag != null) {
+            Text(
+                text = diag,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp, vertical = 2.dp),
+            )
+        }
+
         // ---- 搜索 + 时间范围
         SmallTitle(stringResource(R.string.record_section_filter))
         Card(modifier = Modifier.cardPadding()) {

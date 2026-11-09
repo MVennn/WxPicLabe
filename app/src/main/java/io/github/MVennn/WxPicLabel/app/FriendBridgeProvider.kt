@@ -239,11 +239,24 @@ object RecordStore {
         val editable: Boolean get() = seq > 0L
     }
 
+    /**
+     * 一次回传快照。
+     *
+     * [chars] / [error] / [hasEvents] 是**诊断字段**：记录页拿不到数据时，界面要能
+     * 直接说出「一条都没收到」还是「收到了但解析炸了」还是「收到的是旧版文档」，
+     * 而不是只给一个空白列表让人猜。
+     */
     data class Book(
         val at: Long,
         val edited: String,
         val rows: List<Row>,
         val events: List<Event>,
+        /** 收到的 JSON 字符数，0 = 模块 App 这边根本没有 records_json。 */
+        val chars: Int = 0,
+        /** 解析失败原因；正常为 null。 */
+        val error: String? = null,
+        /** 文档里带没带 events 字段：false + 有 rows = 老版本模块只回传了聚合表。 */
+        val hasEvents: Boolean = false,
     ) {
         val isEmpty: Boolean get() = events.isEmpty() && rows.isEmpty()
     }
@@ -284,9 +297,17 @@ object RecordStore {
                     )
                 }
             }
-            Book(at, edited, rows, if (events.isEmpty()) synth(rows) else events)
+            Book(
+                at = at,
+                edited = edited,
+                rows = rows,
+                events = if (events.isEmpty()) synth(rows) else events,
+                chars = json.length,
+                hasEvents = evArr != null && events.isNotEmpty(),
+            )
         } catch (t: Throwable) {
-            Book(0L, "", emptyList(), emptyList())
+            // 解析失败不能静默吞成空表：记录页会把原因写在概览卡下面
+            Book(0L, "", emptyList(), emptyList(), chars = json.length, error = t.toString())
         }
     }
 

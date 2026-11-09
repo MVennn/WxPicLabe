@@ -49,6 +49,16 @@
 - 切片用 UTF-16 code unit 计，切点落在**代理对中间**时回退一个字，不会把 emoji 缝成半个。
 - Provider（`app/FriendBridgeProvider.kt`）的 `insert` 只在 `isFriends` 时套外壳；
   records 分支 `sb.toString()` 直接落 `records_json`，`records_at` 记写入时刻。
+- **推送是自愈的**（`WxPicLabelModule#pushRecords`）。旧逻辑只有「批次结束 / 兜底 / 三个令牌变化」
+  四处触发，一次失败就永久停在旧快照上——模块 App 的 provider 被系统冻过一次，记录页就再也读不到新数据。
+  现在的做法：
+  - `RecordExporter.push` 返回 `boolean`，任一分片 insert 抛异常就返回 false；
+  - `recordsDirty` **初值 true**：微信进程一起来（`startFallbackPoller`）就先补推一次，不需要用户点刷新、也不需要再发图；
+  - 推失败置脏并退避重试：`recordsRetryAt = now + min(60s, 5s × (1 + 失败次数))`，
+    轮询（700 ms 一次）里 `retryRecordsPush()` 到点再推，成功后清脏、失败计数归零；
+  - 每次 `noteSent` 也置脏，批末那次推失败还有轮询兜着。
+  - `pushRecords` 是 `synchronized` 的：回传是**分片** insert，批末推送、令牌推送、重试三路并发会把两个快照的片
+    拼成一份烂 JSON，必须串行。
 - 模块 App 侧 `RecordStore.read` 解析成 `Book(at, edited, rows, events)`；
   `events` 缺失（**微信进程里跑的还是旧模块**）时用 `synth(rows)` 按聚合表合成占位事件
   （`seq = 0`、`batch = "m"`）。这类行是唯一的「只读」来源：没有 `seq` 就没有动作能定位到它。
@@ -90,6 +100,10 @@
    刷新中显示「正在读取记录…」，`LaunchedEffect` 每 400 ms 轮询一次、最多 15 次（6 秒），读到 `at` 变了就停。
    微信进程不回传时 6 秒就收回提示 —— 旧逻辑死等 18 秒，界面上像卡住。
    概览的副标题优先级：**筛选态先报命中数**（`筛出 N 条 · 按时间段全展开`）> 刷新中 > 空/更新时间。
+   概览卡下面有一行**诊断**（`record_diag_*`），四态直说哪一环断了：
+   `回传 2289 字 · 8 个文件名 / 30 条记录` / `微信进程还没回传过记录：点亮微信（不用发图），再点上面这张卡重新读取` /
+   `回传内容解析失败：<异常>` / `回传的是旧版文档（没有逐次台账）：能看不能改，重启一次微信后自动升级`。
+   数据来自 `RecordStore.Book` 的诊断字段 `chars` / `error` / `hasEvents`（解析异常不再被静默吞成空表）。
 2. **搜索与筛选卡**：`BasicTextField` 一个框覆盖四种查法（都忽略大小写）：
    - 文件名 `contains`（`IMG_0204` / `周报`）；
    - `第几次` 精确相等（输入 `3` 命中「第 3 次」那些行）；
@@ -123,7 +137,9 @@
 
 | 现象 | 先看什么 |
 | --- | --- |
-| 记录页一直「正在读取记录…」 | 微信进程日志有没有 `records: pushed ...`；没有就是令牌没到（`cfgPrefs` 重附着失败，见 `docs/PITFALLS.md` 第 20 条） |
+| 记录页一直「正在读取记录…」 | 先看概览下面的诊断行：写着「还没回传过记录」= 微信进程没推（令牌没到，见 `docs/PITFALLS.md` 第 20 条，或微信进程里没有模块）；写着「解析失败」= provider 拼片出错 |
+| 记录一直是旧的、点刷新也没变 | 模块 App 的 provider 冻过一次就会这样。新版本已自愈（进程起来先补推 + 失败退避重试），仍不更新看模块日志有没有 `reason=retry retry-pending` 连续刷 |
+| 诊断行写着「回传 N 字」但列表空 | 文档到了但 `records`/`events` 都为空：微信进程侧台账是空的（`wxpiclabel_repeat.xml` 丢了），发一张图就会重建 |
 | 记录页有行、点进去只弹「旧版记录只能查看」 | 微信进程里跑的还是旧模块（回传的文档没有 `events`）。装了新包要**重启一次微信**让模块进进程 |
 | 记录页有条目但都显示「旧版」 | `__migrated` 已置位但台账被清空过；发一张新图就会产生带批次的新行 |
 | 改了「第几次」没生效 | 模块日志看 `checkRecordEdits` 是否换了令牌；`img_label_record_edits_token` 没变说明 `ModulePreferences.edit` 没落盘 |

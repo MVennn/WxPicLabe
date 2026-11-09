@@ -289,6 +289,10 @@
     <string name="record_edit_name_message">Only this entry changes; messages already sent stay as they are.</string>
     <string name="record_edit_name_hint">File name</string>
     <string name="record_name_empty">Name cannot be empty</string>
+    <string name="record_diag_ok">received %1$d chars · %2$d names / %3$d records</string>
+    <string name="record_diag_waiting">WeChat has not sent any records back yet: open WeChat (no need to send a photo), then tap the card above to read again</string>
+    <string name="record_diag_error">Could not parse what came back: %1$s</string>
+    <string name="record_diag_legacy">Old-format document (no per-send ledger): view-only, upgrades automatically after one WeChat restart</string>
     <string name="record_edit_nth_title">Change count</string>
     <string name="record_edit_nth_message">Only this entry changes; the next send of this photo continues from the highest remaining count.</string>
     <string name="record_edit_nth_hint">Count</string>

@@ -513,6 +513,7 @@ public class WxPicLabelModule extends XposedModule {
                 }
                 if (mainProcess) {
                     main.post(UiHud::end);
+                    // 这一批发完就该让记录页看见；推失败由 retryRecordsPush 退避重试
                     pushRecords("batch");
                 }
                 // 批末收口：后面的兜底发送要归到自己那一组，不能续在这批里
@@ -906,6 +907,7 @@ public class WxPicLabelModule extends XposedModule {
                     checkRecordReset();
                     checkRecordEdits();
                     checkRecordDump();
+                    retryRecordsPush();
                     checkSelfTest();
                 } catch (Throwable t) {
                     log("fallback: flush failed: " + t);
@@ -1111,24 +1113,68 @@ public class WxPicLabelModule extends XposedModule {
      * <p>触发点：一批发完（保持页面新鲜）、设置页点「刷新」、清空 / 改 / 删生效之后。
      * 一次推**整份文档**（聚合计数表 + 逐次台账 + 已应用令牌），两边永远同一时刻。
      */
-    private void pushRecords(String why) {
+    /**
+     * 记录是否还没送到模块 App（推失败或从没推过）。
+     *
+     * <p>初值 true：微信进程一起来就先补推一次 —— 否则「上一次推送时模块 App 被系统冻住」
+     * 这种一次性失败会让记录页永远是旧数据，用户只能靠再发一张图碰运气。
+     */
+    private volatile boolean recordsDirty = true;
+    /** 下一次允许重试的时间戳（失败后按 5s 起步、最长 60s 退避）。 */
+    private volatile long recordsRetryAt;
+    private volatile int recordsFailures;
+
+    /**
+     * 推一份记录快照到模块 App。
+     *
+     * <p>**加锁**：批末推送、令牌推送、轮询里的重试可能同时进来，而回传是分片 insert，
+     * 两路交错写会让 provider 把两个快照的片拼成一份烂 JSON。
+     */
+    private synchronized void pushRecords(String why) {
         if (!mainProcess) {
             return;
         }
         Context ctx = appContext();
         RepeatCounter r = repeatCounter();
         if (ctx == null || r == null) {
+            recordsRetryAt = System.currentTimeMillis() + 3000L;
             return;
         }
         try {
             List<RepeatCounter.Row> rows = r.snapshot();
             List<RepeatCounter.Event> events = r.events();
-            RecordExporter.push(ctx, rows, events, r.appliedEdits(), this::log);
+            boolean ok = RecordExporter.push(ctx, rows, events, r.appliedEdits(), this::log);
             log("records: snapshot " + rows.size() + " row(s) / " + events.size()
-                    + " event(s) reason=" + why);
+                    + " event(s) reason=" + why + (ok ? " ok" : " retry-pending"));
+            if (ok) {
+                recordsDirty = false;
+                recordsFailures = 0;
+                recordsRetryAt = 0L;
+            } else {
+                scheduleRecordsRetry();
+            }
         } catch (Throwable t) {
             log("records: snapshot failed: " + t);
+            scheduleRecordsRetry();
         }
+    }
+
+    private void scheduleRecordsRetry() {
+        recordsDirty = true;
+        long backoff = Math.min(60_000L, 5_000L * (1L + recordsFailures));
+        recordsFailures++;
+        recordsRetryAt = System.currentTimeMillis() + backoff;
+    }
+
+    /** 轮询里的自愈：记录还没送达且退避时间已过，就再推一次。 */
+    private void retryRecordsPush() {
+        if (!mainProcess || !recordsDirty) {
+            return;
+        }
+        if (System.currentTimeMillis() < recordsRetryAt) {
+            return;
+        }
+        pushRecords("retry");
     }
 
     /** 设置页点了「刷新记录」就把令牌换一个新值，这里比对后回传一次。 */
@@ -1202,6 +1248,8 @@ public class WxPicLabelModule extends XposedModule {
             return;
         }
         long seq = c.record(label, 0, curBatch, System.currentTimeMillis());
+        // 台账变过 = 记录页该更新了：批末那次推失败还有轮询里的退避重试兜着
+        recordsDirty = true;
         if (seq <= 0L) {
             log("records: note failed for " + label);
         }
