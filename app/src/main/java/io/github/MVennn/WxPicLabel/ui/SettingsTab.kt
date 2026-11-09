@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,22 @@ import io.github.MVennn.WxPicLabel.ui.GsSwitchPreference
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/**
+ * 桌面图标开关的 UI 状态源。**只认独立本地镜像**（与 LauncherIcon.apply 同源）。
+ *
+ * 不复用 [rememberBoolPref]：那个读的是 `ConfigKeys.DESKTOP_ICON` 配置仓库，
+ * 全新安装 / 镜像键缺失时会返回 `DEFAULT_DESKTOP_ICON = true`，出现「开关显示开、
+ * 图标却隐藏」的语义撕裂。镜像缺省为 false，applyFromLocal 会把它固化写回。
+ *
+ * 切换后由调用方直接写 `MutableState.value`，不依赖 ModulePreferences.observe，
+ * 避免把配置通知回路重新接回来。
+ */
+@Composable
+private fun rememberDesktopIconVisible(): MutableState<Boolean> {
+    val ctx = LocalContext.current
+    return remember(ctx) { mutableStateOf(LauncherIcon.isVisible(ctx)) }
+}
 
 /**
  * Tab 3 · 设置 —— **只放模块范围内的设置项**。
@@ -153,7 +170,10 @@ internal fun SettingsTab(
     var languageAnchor by remember { mutableStateOf<Rect?>(null) }
     var logLevelAnchor by remember { mutableStateOf<Rect?>(null) }
 
-    val desktopIcon by rememberBoolPref(ConfigKeys.DESKTOP_ICON, ConfigKeys.DEFAULT_DESKTOP_ICON)
+    // 桌面图标开关的 UI 状态与 alias 组件状态同源：只读独立本地镜像。
+    // 不走 rememberBoolPref（它读 remote/LOCAL 配置，全新安装会显示 true、与隐藏的 alias 撕裂）。
+    val desktopIconState = rememberDesktopIconVisible()
+    val desktopIcon by desktopIconState
     val liquidGlass by rememberBoolPref(ConfigKeys.LIQUID_GLASS, ConfigKeys.DEFAULT_LIQUID_GLASS)
     val glassEffect by rememberBoolPref(ConfigKeys.GLASS_EFFECT, ConfigKeys.DEFAULT_GLASS_EFFECT)
     val theme by rememberStringPref(ConfigKeys.THEME, ConfigKeys.DEFAULT_THEME)
@@ -259,7 +279,11 @@ internal fun SettingsTab(
             GsSwitchPreference(
                 checked = desktopIcon,
                 onCheckedChange = { v ->
+                    // 1) 保留配置字段 / 快照语义（DESKTOP_ICON 仍写 remote 或 LOCAL 配置仓库）；
+                    // 2) 立即刷新 UI，不等重组回流；
+                    // 3) apply 内部先写独立本地镜像，再显式启用/禁用 alias。
                     ModulePreferences.edit { putBoolean(ConfigKeys.DESKTOP_ICON, v) }
+                    desktopIconState.value = v
                     LauncherIcon.apply(ctx, v)
                 },
                 title = stringResource(R.string.item_desktop_icon),

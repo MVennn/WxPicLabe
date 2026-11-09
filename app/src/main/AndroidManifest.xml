@@ -43,7 +43,7 @@
         -->
         <activity-alias
             android:name=".ui.LauncherAlias"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
             android:label="@string/app_name"
@@ -54,6 +54,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+
+        <!--
+            覆盖安装后重放「桌面图标」本地镜像偏好。
+            MY_PACKAGE_REPLACED 是 Android 8.0 隐式广播限制里「只发给本包」的豁免广播；
+            exported=false：只接系统发给自己的这一条，不对其它应用暴露。
+        -->
+        <receiver
+            android:name=".app.PackageReplacedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!--
             adb 调试通道（开发期用，不参与运行期配置读取）。

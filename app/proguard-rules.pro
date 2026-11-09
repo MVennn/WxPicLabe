@@ -9,10 +9,11 @@
 # 入口类：框架按 META-INF/xposed/java_init.list 里的类名反射实例化
 -keep class io.github.MVennn.WxPicLabel.WxPicLabelModule { *; }
 
-# Application / Activity / Provider 由系统按 manifest 实例化。
+# Application / Activity / Provider / Receiver 由系统按 manifest 实例化。
 -keep class io.github.MVennn.WxPicLabel.app.WxPicApp { *; }
 -keep class io.github.MVennn.WxPicLabel.ui.SettingsActivity { *; }
 -keep class io.github.MVennn.WxPicLabel.app.DebugConfigProvider { *; }
+-keep class io.github.MVennn.WxPicLabel.app.PackageReplacedReceiver { *; }
 
 # 好友名单回传通道（微信进程按 authority 查找并写入）
 -keep class io.github.MVennn.WxPicLabel.app.FriendBridgeProvider { *; }
