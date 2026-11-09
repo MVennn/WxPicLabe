@@ -296,6 +296,7 @@
     <string name="record_saved">Record updated</string>
     <string name="record_deleted">Entry deleted</string>
     <string name="record_empty_search">No matching records. Try another keyword or a wider time range.</string>
+    <string name="record_search_hits">%1$d match(es) · all groups expanded</string>
     <string name="record_clear_message">The ledger and the +N counters are cleared together. This cannot be undone.</string>
     <string name="img_label_section_hud">Send feedback</string>
     <string name="img_label_hud_toast_switch">Send progress toast</string>

@@ -302,6 +302,7 @@
     <string name="record_saved">已更新记录</string>
     <string name="record_deleted">已删除这条记录</string>
     <string name="record_empty_search">没有符合条件的记录，换个关键词或放宽时间范围。</string>
+    <string name="record_search_hits">筛出 %1$d 条 · 按时间段全展开</string>
     <string name="record_clear_message">台账与 +N 次数一起清零，清空后不能恢复。</string>
     <string name="img_label_section_hud">发送提示</string>
     <string name="img_label_hud_toast_switch">发送进度提示</string>

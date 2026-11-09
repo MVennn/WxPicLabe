@@ -197,7 +197,8 @@ internal fun ImgLabelRecordScreen() {
         val baseline = book.at
         refreshing = true
         var tries = 0
-        while (tries < 45) {
+        // 6 秒还没回传就收回「正在读取」：旧逻辑死等 18 秒，界面上像卡住
+        while (tries < 15) {
             delay(400)
             tries++
             val fresh = RecordStore.read(ctx)
@@ -255,22 +256,47 @@ internal fun ImgLabelRecordScreen() {
     val now = remember(book.at, tick) { System.currentTimeMillis() }
     val floor = rangeFloor(range, now)
     val needle = query.trim()
+    // 搜索的硬要求：命中什么，就要**立刻看得见**什么。
+    // 只展开「最新一组」在筛选态下会把命中但非最新的组折起来 —— 这正是
+    // 「输入文件名却搜不到记录」的真相：组头还在、还写着 N 张，行全被折着。
+    val filtering = needle.isNotEmpty() || floor != 0L
+    fun matchesQuery(ev: RecordStore.Event): Boolean {
+        if (needle.isEmpty()) return true
+        if (ev.label.contains(needle, ignoreCase = true)) return true
+        // 顺手支持按「第几次」与时间片段搜：输入 15:31 / 11-09 15:31 / 3 都能命中
+        if (ev.n.toString() == needle) return true
+        // 纯数字只按「第几次」和文件名理解，不再去撞时间串：
+        // 否则搜 3 会被 15:31 这种时分数一起命中，看起来像筛选失灵
+        if (needle.all { it.isDigit() }) return false
+        val hms = hmsFmt.format(Date(ev.at))
+        val full = fullFmt.format(Date(ev.at))
+        return hms.contains(needle) || full.contains(needle)
+    }
     val filtered = remember(live, needle, floor) {
-        if (needle.isEmpty() && floor == 0L) {
+        if (!filtering) {
             live
         } else {
-            live.filter { ev ->
-                (floor == 0L || ev.at >= floor) &&
-                    (needle.isEmpty() || ev.label.contains(needle, ignoreCase = true))
-            }
+            live.filter { ev -> (floor == 0L || ev.at >= floor) && matchesQuery(ev) }
         }
     }
     val groups = remember(filtered) { groupEvents(filtered) }
-    // 默认态：展开最新的一组；用户点过之后就完全按 expanded 走
-    val openKeys = expanded ?: groups.take(1).map { it.key }.toSet()
+    // 筛选态另开一份「手动折叠」集合（退出筛选即清空）：命中组默认全部展开，
+    // 用户仍可点组头收起。非筛选态保持原语义：默认只展开最新一组。
+    var filterClosed by remember { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(needle, floor) { filterClosed = emptySet() }
+    val openKeys = if (filtering) {
+        groups.map { it.key }.toSet() - filterClosed
+    } else {
+        expanded ?: groups.take(1).map { it.key }.toSet()
+    }
 
     fun toggle(key: String) {
-        expanded = if (key in openKeys) openKeys - key else openKeys + key
+        if (filtering) {
+            filterClosed = if (key in filterClosed) filterClosed - key else filterClosed + key
+        } else {
+            val base = openKeys
+            expanded = if (key in base) base - key else base + key
+        }
     }
 
     /**
@@ -383,6 +409,8 @@ internal fun ImgLabelRecordScreen() {
             BasicComponent(
                 title = stringResource(R.string.record_count, live.size),
                 summary = when {
+                    // 筛选态第一眼要看的是「找到几条」：它比刷新状态和更新时间都重要
+                    filtering -> stringResource(R.string.record_search_hits, filtered.size)
                     refreshing -> stringResource(R.string.record_refreshing)
                     book.at == 0L -> stringResource(R.string.record_empty_hint)
                     else -> stringResource(
