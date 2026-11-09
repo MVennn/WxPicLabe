@@ -427,9 +427,19 @@ internal fun ImgLabelRecordScreen() {
         //      而不是只给一个空白列表。这条也是用户反馈「读不出来」时的第一手证据。
         val err = book.error
         val diag = when {
-            refreshing -> null
+            // 刷新中只在「还没有任何快照」时藏诊断；已有数据就把上一次的结构诊断留在原地，
+            // 否则每次进页那 6 秒都会退回「0 个文件名 0 条记录」的空白态，像是读不到
+            refreshing && book.at == 0L -> null
             err != null -> stringResource(R.string.record_diag_error, err)
             book.at == 0L -> stringResource(R.string.record_diag_waiting)
+            // 文档到了、也解析了，但顶层结构不是我们认识的形状（老模块 / 半截文档）
+            book.rows.isEmpty() && book.events.isEmpty() && (book.rawRows > 0 || book.rawEvents > 0) ->
+                stringResource(R.string.record_diag_schema, book.chars, book.topKeys, book.rawRows, book.rawEvents)
+            // 文档合法但一条记录也没有
+            book.rows.isEmpty() && book.events.isEmpty() && book.chars > 0 ->
+                stringResource(R.string.record_diag_doc_empty, book.chars, book.topKeys)
+            // 文档整体坏了，靠原文回捞救回来的
+            book.path == "salvage" -> stringResource(R.string.record_diag_salvaged, book.chars, book.rows.size, live.size)
             !book.hasEvents && book.rows.isNotEmpty() -> stringResource(R.string.record_diag_legacy)
             else -> stringResource(R.string.record_diag_ok, book.chars, book.rows.size, live.size)
         }

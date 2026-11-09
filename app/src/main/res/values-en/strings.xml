@@ -293,6 +293,9 @@
     <string name="record_diag_waiting">WeChat has not sent any records back yet: open WeChat (no need to send a photo), then tap the card above to read again</string>
     <string name="record_diag_error">Could not parse what came back: %1$s</string>
     <string name="record_diag_legacy">Old-format document (no per-send ledger): view-only, upgrades automatically after one WeChat restart</string>
+    <string name="record_diag_schema">%1$d chars came back but nothing parses (top-level keys %2$s; raw %3$d / %4$d items): force-stop WeChat, reopen it, and let the new module push again</string>
+    <string name="record_diag_doc_empty">%1$d chars came back with no records inside (top-level keys %2$s): send a few photos, then refresh</string>
+    <string name="record_diag_salvaged">%1$d chars came back, document incomplete: recovered %2$d names / %3$d records from the raw text</string>
     <string name="record_edit_nth_title">Change count</string>
     <string name="record_edit_nth_message">Only this entry changes; the next send of this photo continues from the highest remaining count.</string>
     <string name="record_edit_nth_hint">Count</string>

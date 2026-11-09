@@ -303,6 +303,9 @@
     <string name="record_diag_waiting">微信进程还没回传过记录：点亮微信（不用发图），再点上面这张卡重新读取</string>
     <string name="record_diag_error">回传内容解析失败：%1$s</string>
     <string name="record_diag_legacy">回传的是旧版文档（没有逐次台账）：能看不能改，重启一次微信后自动升级</string>
+    <string name="record_diag_schema">回传 %1$d 字，但一条都解析不出来（顶层键 %2$s；原始 %3$d / %4$d 项）：强制停止微信再打开，让它用新模块重推一次</string>
+    <string name="record_diag_doc_empty">回传 %1$d 字，里面一条记录也没有（顶层键 %2$s）：发几张图之后再刷新</string>
+    <string name="record_diag_salvaged">回传 %1$d 字，文档不完整：已按原文回捞 %2$d 个文件名 / %3$d 条</string>
     <string name="record_saved">已更新记录</string>
     <string name="record_deleted">已删除这条记录</string>
     <string name="record_empty_search">没有符合条件的记录，换个关键词或放宽时间范围。</string>

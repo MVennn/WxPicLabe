@@ -257,6 +257,14 @@ object RecordStore {
         val error: String? = null,
         /** 文档里带没带 events 字段：false + 有 rows = 老版本模块只回传了聚合表。 */
         val hasEvents: Boolean = false,
+        /** 顶层 records 数组里到底有几个元素（可能全被过滤掉）。 */
+        val rawRows: Int = 0,
+        /** 顶层 events 数组里到底有几个元素。 */
+        val rawEvents: Int = 0,
+        /** 顶层键名，诊断行直接摆出来。 */
+        val topKeys: String = "",
+        /** 读到它的路径：strict / lenient / salvage / empty。 */
+        val path: String = "strict",
     ) {
         val isEmpty: Boolean get() = events.isEmpty() && rows.isEmpty()
     }
@@ -268,49 +276,225 @@ object RecordStore {
         if (json.isEmpty()) {
             return Book(0L, "", emptyList(), emptyList())
         }
-        return try {
+        // 三层读取。第一层按当前格式严格读；第二层换键名读（老版本分支写出来的文档
+        // 字段名不一样）；第三层直接在我们自己写出去的两种 JSON 形状上做正则回捞 ——
+        // 文档被截断、分片没拼全、整体不是合法 JSON 时，这是唯一还能把条目救回来的路。
+        var parseError: String? = null
+        var topKeys = ""
+        var rawRows = 0
+        var rawEvents = 0
+        var edited = ""
+        var rows: List<Row> = emptyList()
+        var events: List<Event> = emptyList()
+        var path = "strict"
+        try {
             val root = JSONObject(json)
-            val edited = root.optString("edited", "")
-            val rowsArr = root.optJSONArray("records") ?: JSONArray()
-            val rows = ArrayList<Row>(rowsArr.length())
-            for (i in 0 until rowsArr.length()) {
-                val o = rowsArr.optJSONObject(i) ?: continue
-                val label = o.optString("label", "")
-                if (label.isEmpty()) continue
-                rows.add(Row(label, o.optInt("count", 0), o.optLong("last", 0L)))
+            topKeys = keysOf(root)
+            edited = root.optString("edited", "")
+            val rowsArr = arrayOf(root, "records", "rows")
+            val evArr = arrayOf(root, "events", "event", "log")
+            rawRows = rowsArr?.length() ?: 0
+            rawEvents = evArr?.length() ?: 0
+            rows = parseRows(rowsArr)
+            events = parseEvents(evArr)
+            if (rows.isEmpty() && events.isEmpty() && (rawRows > 0 || rawEvents > 0)) {
+                path = "lenient"
             }
-            val evArr = root.optJSONArray("events")
-            val events = ArrayList<Event>()
-            if (evArr != null) {
-                for (i in 0 until evArr.length()) {
-                    val o = evArr.optJSONObject(i) ?: continue
-                    val label = o.optString("l", "")
-                    if (label.isEmpty()) continue
-                    events.add(
-                        Event(
-                            seq = o.optLong("s", 0L),
-                            at = o.optLong("t", 0L),
-                            label = label,
-                            n = o.optInt("n", 0),
-                            batch = o.optString("b", ""),
-                        )
-                    )
-                }
-            }
-            Book(
-                at = at,
-                edited = edited,
-                rows = rows,
-                events = if (events.isEmpty()) synth(rows) else events,
-                chars = json.length,
-                hasEvents = evArr != null && events.isNotEmpty(),
-            )
         } catch (t: Throwable) {
-            // 解析失败不能静默吞成空表：记录页会把原因写在概览卡下面
-            Book(0L, "", emptyList(), emptyList(), chars = json.length, error = t.toString())
+            parseError = t.toString()
         }
+        if (rows.isEmpty() && events.isEmpty()) {
+            val sRows = salvageRows(json)
+            val sEvents = salvageEvents(json)
+            if (sRows.isNotEmpty() || sEvents.isNotEmpty()) {
+                rows = sRows
+                events = sEvents
+                if (edited.isEmpty()) {
+                    edited = RE_EDITED.find(json)?.groupValues?.get(1)?.let { unescape(it) } ?: ""
+                }
+                path = "salvage"
+            } else {
+                path = "empty"
+            }
+        }
+        val hasEv = events.isNotEmpty()
+        val parsedAny = rows.isNotEmpty() || events.isNotEmpty()
+        return Book(
+            at = at,
+            edited = edited,
+            rows = rows,
+            events = if (hasEv) events else synth(rows),
+            chars = json.length,
+            error = if (parsedAny) null else parseError,
+            hasEvents = hasEv,
+            rawRows = rawRows,
+            rawEvents = rawEvents,
+            topKeys = topKeys,
+            path = path,
+        )
     }
 
+    /** 顶层键（截断到 120 字）：结构对不上时界面直接把这一串摆出来。 */
+    private fun keysOf(o: JSONObject): String {
+        val it = o.keys()
+        val sb = StringBuilder()
+        while (it.hasNext()) {
+            if (sb.isNotEmpty()) sb.append(',')
+            sb.append(it.next())
+            if (sb.length > 120) break
+        }
+        return sb.toString()
+    }
+
+    /** 依次尝试几个可能的键名，返回第一个是数组的。 */
+    private fun arrayOf(root: JSONObject, vararg keys: String): JSONArray? {
+        for (k in keys) {
+            val a = root.optJSONArray(k)
+            if (a != null) return a
+        }
+        return null
+    }
+
+    private fun pickStr(o: JSONObject, vararg keys: String): String {
+        for (k in keys) {
+            val v = o.optString(k, "")
+            if (v.isNotEmpty()) return v
+        }
+        return ""
+    }
+
+    private fun pickLong(o: JSONObject, vararg keys: String): Long {
+        for (k in keys) {
+            if (!o.has(k)) continue
+            val v = o.optLong(k, Long.MIN_VALUE)
+            if (v != Long.MIN_VALUE) return v
+        }
+        return 0L
+    }
+
+    /** 聚合表：元素可以是对象（label/count/last 及常见别名），也可以是三元数组。 */
+    private fun parseRows(arr: JSONArray?): List<Row> {
+        if (arr == null || arr.length() == 0) return emptyList()
+        val out = ArrayList<Row>(arr.length())
+        for (i in 0 until arr.length()) {
+            val label: String
+            var count = 0
+            var last = 0L
+            val o = arr.optJSONObject(i)
+            if (o != null) {
+                label = pickStr(o, "label", "name", "l", "text")
+                count = pickLong(o, "count", "n", "c", "times").toInt()
+                last = pickLong(o, "last", "t", "at", "time")
+            } else {
+                val a = arr.optJSONArray(i) ?: continue
+                label = a.optString(0, "")
+                count = a.optInt(1, 0)
+                last = a.optLong(2, 0L)
+            }
+            if (label.isEmpty()) continue
+            out.add(Row(label, count, last))
+        }
+        return out
+    }
+
+    /** 台账：元素字段名同样容忍别名。 */
+    private fun parseEvents(arr: JSONArray?): List<Event> {
+        if (arr == null || arr.length() == 0) return emptyList()
+        val out = ArrayList<Event>(arr.length())
+        for (i in 0 until arr.length()) {
+            val label: String
+            var seq = 0L
+            var at = 0L
+            var n = 0
+            var batch = ""
+            val o = arr.optJSONObject(i)
+            if (o != null) {
+                label = pickStr(o, "l", "label", "name", "text")
+                seq = pickLong(o, "s", "seq", "id")
+                at = pickLong(o, "t", "at", "time", "ts")
+                n = pickLong(o, "n", "c", "count", "nth").toInt()
+                batch = pickStr(o, "b", "batch", "g")
+            } else {
+                val a = arr.optJSONArray(i) ?: continue
+                seq = a.optLong(0, 0L)
+                at = a.optLong(1, 0L)
+                label = a.optString(2, "")
+                n = a.optInt(3, 0)
+                batch = a.optString(4, "")
+            }
+            if (label.isEmpty()) continue
+            out.add(Event(seq, at, label, n, batch))
+        }
+        return out
+    }
+
+    /** 按 {"label":"…","count":N,"last":T} 的形状从原文里捞聚合表。 */
+    private fun salvageRows(json: String): List<Row> {
+        val out = ArrayList<Row>()
+        for (m in RE_ROW.findAll(json)) {
+            val label = unescape(m.groupValues[1])
+            if (label.isEmpty()) continue
+            out.add(Row(label, m.groupValues[2].toIntOrNull() ?: 0, m.groupValues[3].toLongOrNull() ?: 0L))
+        }
+        return out
+    }
+
+    /** 按 {"s":…,"t":…,"l":"…","n":…,"b":"…"} 的形状从原文里捞台账。 */
+    private fun salvageEvents(json: String): List<Event> {
+        val out = ArrayList<Event>()
+        for (m in RE_EV.findAll(json)) {
+            val label = unescape(m.groupValues[3])
+            if (label.isEmpty()) continue
+            out.add(
+                Event(
+                    seq = m.groupValues[1].toLongOrNull() ?: 0L,
+                    at = m.groupValues[2].toLongOrNull() ?: 0L,
+                    label = label,
+                    n = m.groupValues[4].toIntOrNull() ?: 0,
+                    batch = unescape(m.groupValues[5]),
+                )
+            )
+        }
+        return out
+    }
+
+    private val RE_ROW = Regex("""\{"label":"((?:[^"\\]|\\.)*)","count":(-?\d+),"last":(-?\d+)\}""")
+    private val RE_EV = Regex("""\{"s":(-?\d+),"t":(-?\d+),"l":"((?:[^"\\]|\\.)*)","n":(-?\d+),"b":"((?:[^"\\]|\\.)*)"\}""")
+    private val RE_EDITED = Regex("\"edited\":\"((?:[^\"\\\\]|\\\\.)*)\"")
+
+    /** JSON 字符串里的转义还原（只处理我们自己会写出去的那几种）。 */
+    private fun unescape(raw: String): String {
+        if (raw.indexOf('\\') < 0) return raw
+        val sb = StringBuilder(raw.length)
+        var i = 0
+        while (i < raw.length) {
+            val ch = raw[i]
+            if (ch != '\\' || i + 1 >= raw.length) {
+                sb.append(ch)
+                i++
+                continue
+            }
+            when (val n = raw[i + 1]) {
+                'n' -> sb.append('\n')
+                't' -> sb.append('\t')
+                'r' -> sb.append('\r')
+                'b' -> sb.append('\b')
+                'f' -> sb.append('\u000C')
+                'u' -> {
+                    val code = if (i + 5 < raw.length) raw.substring(i + 2, i + 6).toIntOrNull(16) else null
+                    if (code != null) {
+                        sb.append(code.toChar())
+                        i += 6
+                        continue
+                    }
+                    sb.append(n)
+                }
+                else -> sb.append(n)
+            }
+            i += 2
+        }
+        return sb.toString()
+    }
     /** 老文档没有台账：按聚合表拼出占位事件，至少让界面有东西可看（不可编辑）。 */
     private fun synth(rows: List<Row>): List<Event> {
         val out = ArrayList<Event>()
