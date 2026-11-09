@@ -120,6 +120,15 @@ public class WxPicLabelModule extends XposedModule {
     private volatile String renameCacheRaw;
     /** 已处理过的「回传发送记录」令牌。 */
     private volatile String lastRecordDump;
+    /** 当前批次的 id：同一批发送的事件归成一组，记录页按它折叠。 */
+    private volatile String curBatch;
+    /** 已处理过的「改 / 删发送记录」令牌。 */
+    private volatile String lastEditsToken;
+    /** 已处理过的「清空发送记录」令牌（轮询侧比对；发送链路自己也会比一次）。 */
+    private volatile String lastResetToken;
+    /** 批次自增号：同一毫秒起两批也不会撞 id。 */
+    private final java.util.concurrent.atomic.AtomicInteger batchSeq =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     // ------------------------------------------------------------------ 生命周期
 
@@ -418,6 +427,10 @@ public class WxPicLabelModule extends XposedModule {
         // 一旦触发，本进程后续每一批都会退化，永远不自愈。
         sentMisses = 0;
 
+        // 本批的批次 id：记录页按它把「一口气发的那一堆」折成一组，
+        // 组头就是这一批开始的时间戳 —— 用户点它就展开那一堆图。
+        curBatch = newBatchId();
+
         // 本批的文字缓存：同一个条目只计一次次数
         batchTexts = new IdentityHashMap<>();
         // 兜底队列若已为这一批算过文字（db0.u#Vj 先到），直接复用；
@@ -480,6 +493,9 @@ public class WxPicLabelModule extends XposedModule {
                                 : textFor(entry);
                         if (!sendLabel(label, idx, total)) {
                             log("takeover: text#" + idx + " not sent");
+                        } else {
+                            // 确认进了发送队列才记台账：没发出去的不算「第几次」
+                            noteSent(label);
                         }
                         sleepQuietly(gap);
                     } catch (Throwable t) {
@@ -499,6 +515,8 @@ public class WxPicLabelModule extends XposedModule {
                     main.post(UiHud::end);
                     pushRecords("batch");
                 }
+                // 批末收口：后面的兜底发送要归到自己那一组，不能续在这批里
+                curBatch = null;
                 takeoverUntil = 0L;
                 log("takeover: done, sent=" + sent + " failed=" + failed.size()
                         + " misses=" + sentMisses);
@@ -646,7 +664,7 @@ public class WxPicLabelModule extends XposedModule {
                 return false;
             }
         }
-        return true;
+        return queued;
     }
 
     // ------------------------------------------------------------------ 钩子：批量入口 / 成功事件
@@ -856,6 +874,8 @@ public class WxPicLabelModule extends XposedModule {
             for (Object o : list) {
                 labels.add(textFor(o));
             }
+            // 兜底发送整批共用同一个批次 id，记录页把它们折成一组
+            curBatch = newBatchId();
             armFallback(labels, 0);
             log("fallback: armed at Vj, labels=" + labels);
         } catch (Throwable t) {
@@ -883,6 +903,8 @@ public class WxPicLabelModule extends XposedModule {
                 try {
                     flushFallback();
                     checkScopeRefresh();
+                    checkRecordReset();
+                    checkRecordEdits();
                     checkRecordDump();
                     checkSelfTest();
                 } catch (Throwable t) {
@@ -979,8 +1001,13 @@ public class WxPicLabelModule extends XposedModule {
         pendingAt = System.currentTimeMillis();
         boolean ok = UiSender.send(main, label, null);
         log("fallback: label#" + (i + 1) + "/" + labels.size() + " " + label + " uiSent=" + ok);
+        if (ok) {
+            noteSent(label);
+        }
         if (pendingIndex >= labels.size()) {
             pendingLabels = null;
+            curBatch = null;
+            pushRecords("fallback");
         }
     }
 
@@ -1079,9 +1106,10 @@ public class WxPicLabelModule extends XposedModule {
     }
 
     /**
-     * 把当前计数表推回模块 App（「发送记录」页面的数据源）。
+     * 把当前记录推回模块 App（「发送记录」页面的数据源）。
      *
-     * <p>触发点两个：一批发完（保持页面新鲜）、设置页点「刷新」（令牌变化）。
+     * <p>触发点：一批发完（保持页面新鲜）、设置页点「刷新」、清空 / 改 / 删生效之后。
+     * 一次推**整份文档**（聚合计数表 + 逐次台账 + 已应用令牌），两边永远同一时刻。
      */
     private void pushRecords(String why) {
         if (!mainProcess) {
@@ -1094,8 +1122,10 @@ public class WxPicLabelModule extends XposedModule {
         }
         try {
             List<RepeatCounter.Row> rows = r.snapshot();
-            RecordExporter.push(ctx, rows, this::log);
-            log("records: snapshot " + rows.size() + " reason=" + why);
+            List<RepeatCounter.Event> events = r.events();
+            RecordExporter.push(ctx, rows, events, r.appliedEdits(), this::log);
+            log("records: snapshot " + rows.size() + " row(s) / " + events.size()
+                    + " event(s) reason=" + why);
         } catch (Throwable t) {
             log("records: snapshot failed: " + t);
         }
@@ -1113,6 +1143,73 @@ public class WxPicLabelModule extends XposedModule {
             return;
         }
         pushRecords("token");
+    }
+
+    /**
+     * 设置页点了「清空发送记录」：令牌变了就把台账与计数一起清掉，立刻回传。
+     *
+     * <p>发送链路自己也会比对令牌（{@code RepeatCounter.bump}），这里补的是
+     * 「清完不发送、只想看见记录变空」的情况。
+     */
+    private void checkRecordReset() {
+        String mark = cfgStr(ConfigKeys.IMG_LABEL_REPEAT_RESET,
+                ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_RESET);
+        if (mark.equals(lastResetToken)) {
+            return;
+        }
+        lastResetToken = mark;
+        RepeatCounter r = repeatCounter();
+        if (r == null) {
+            return;
+        }
+        if (r.applyReset(mark)) {
+            log("records: cleared by token");
+            pushRecords("reset");
+        }
+    }
+
+    /**
+     * 设置页改了 / 删了记录：令牌变了就把整组动作重新应用一遍，再回传。
+     *
+     * <p>动作是幂等的（见 {@link RepeatCounter#applyEdits}），所以不需要跟踪
+     * 「哪条已应用」—— 每次令牌变化整体重放，结果一致。
+     */
+    private void checkRecordEdits() {
+        String mark = cfgStr(ConfigKeys.IMG_LABEL_RECORD_EDITS_TOKEN,
+                ConfigKeys.DEFAULT_IMG_LABEL_RECORD_EDITS_TOKEN);
+        if (mark.equals(lastEditsToken)) {
+            return;
+        }
+        lastEditsToken = mark;
+        if (mark.isEmpty()) {
+            return;
+        }
+        RepeatCounter r = repeatCounter();
+        if (r == null) {
+            return;
+        }
+        java.util.Set<String> ops = cfgStringSet(ConfigKeys.IMG_LABEL_RECORD_EDITS);
+        boolean changed = r.applyEdits(ops);
+        r.markEditsApplied(mark);
+        log("records: edits applied, ops=" + ops.size() + " changed=" + changed);
+        pushRecords("edits");
+    }
+
+    /** 记一条发送事件进台账；失败只打日志，不影响发送。 */
+    private void noteSent(String label) {
+        RepeatCounter c = repeatCounter();
+        if (c == null || label == null || label.isEmpty()) {
+            return;
+        }
+        long seq = c.record(label, 0, curBatch, System.currentTimeMillis());
+        if (seq <= 0L) {
+            log("records: note failed for " + label);
+        }
+    }
+
+    /** 批次 id：时间戳 + 进程内自增，同一毫秒起两批也不会撞。 */
+    private String newBatchId() {
+        return "b" + System.currentTimeMillis() + "-" + batchSeq.incrementAndGet();
     }
 
     /** 计数仓库懒加载；建不出来就返回 null（调用方按第 1 次处理）。 */

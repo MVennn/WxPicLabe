@@ -10,7 +10,15 @@ import androidx.compose.ui.graphics.ImageBitmap
 /** 弹窗内容的公共接口：都带一个可选的「触发控件位置」，用来做锚定定位 */
 internal sealed interface DialogSpec {
 
-    /** 触发控件在**窗口坐标系**里的矩形；`null` = 不锚定（贴底 / 居中） */
+    /**
+     * 触发控件在**窗口坐标系**里的矩形；`null` = 不锚定（贴底 / 居中）。
+     *
+     * 这个字段不是「想给就给」的装饰，它决定弹层是**小菜单**还是**整屏大列表**
+     * （见 `AppDialogHost.kt` 的宽度上限分支）：
+     *  - 有 anchor → 菜单宽度 `MenuWidth`，右缘对齐该控件，从它旁边弹出 / 缩回；
+     *  - 没有 anchor → 全宽居中，观感上就是个「盖住半屏的列表」。
+     * 所以「行内选值」必须传 anchor，传漏了不会报错，只会变成另一种弹窗。
+     */
     val anchor: Rect?
 
     /**
@@ -22,7 +30,19 @@ internal sealed interface DialogSpec {
     val dismissible: Boolean get() = true
 }
 
-/** 一个「单选」弹窗：若干选项 + 当前选中项。**没有标题**（2.9.2 去掉） */
+/**
+ * 一个「单选」弹窗：若干选项 + 当前选中项。**没有标题**（2.9.2 去掉）。
+ *
+ * 这是**锚定小菜单**，只有一种用法：点某一行，菜单贴着那一行弹出来。
+ * 因此 [anchor] 是必填语义 —— 调用方要用 `Modifier.onGloballyPositioned { anchor = it.boundsInWindow() }`
+ * 把行的窗口矩形存进 state 再传进来（参见 `SettingsTab` 的主题 / 语言 / 日志等级）。
+ *
+ * 不传 anchor 不会报错，但会退化成**全宽居中大列表**：那不是这个规格的形态，
+ * 需要「贴底 + 标题 + 说明」时用 [ConfirmDialogSpec]（确认）或 [TextInputDialogSpec]（输入）。
+ *
+ * 动作菜单（一列动词，如「改文件名 / 改第几次 / 删除这条」）同样用它：
+ * `selectedIndex = -1` 不画勾，配 [disabledIndices] 表达「点了也没变化」的项。
+ */
 internal class ChoiceDialogSpec(
     val items: List<String>,
     val selectedIndex: Int,
@@ -38,14 +58,53 @@ internal class ChoiceDialogSpec(
     val disabledIndices: Set<Int> = emptySet(),
 ) : DialogSpec
 
-/** 一个「确认 / 取消」弹窗：标题 + 说明 + 两个按钮，贴屏幕底部弹出 */
+/**
+ * 一个「确认 / 取消」弹窗：标题 + 说明 + 两个按钮，贴屏幕底部弹出。
+ *
+ * [anchor] 恒为 `null` —— 贴底 sheet 不跟着控件走（它比控件宽得多，锚定反而错位）。
+ * 不可逆动作先过这里：删除单条记录、清空台账、重置模块。
+ *
+ * **纯说明也能用它**（例如记录页点只读条目的解释）：此时 [cancelText] 传空串，
+ * 弹层只画一颗 [confirmText] 按钮 —— 两粒都关弹层的按钮只会让人以为是选择题。
+ */
 internal class ConfirmDialogSpec(
     val title: String,
     val message: String,
     val confirmText: String,
+    /** 取消按钮文字；传空串 = 不画这颗按钮（纯说明卡） */
     val cancelText: String,
     val onConfirm: () -> Unit,
     override val anchor: Rect? = null,
+) : DialogSpec
+
+/**
+ * 文本输入弹窗：标题 + 说明 + 单行输入框 + 两个按钮（与 [ConfirmDialogSpec] 同一个贴底壳）。
+ *
+ * 「发送记录」页的改文件名、改「第几次」用它 —— 这两处都需要在弹层里就地编辑，
+ * 而不是跳一个二级页（记录条目本身是列表行，跳页会丢掉当前滚动位置与筛选条件）。
+ *
+ * 形态是**贴底 sheet**（和键盘一起抬起来），所以不给锚定 —— 从行内动作菜单进来，
+ * 不要拿它当「行内选值」用（那属于 [ChoiceDialogSpec]）。
+ *
+ * [validate] 在**弹层内**校验：返回 `null` 表示通过并关闭；返回非空字符串时**不关闭**，
+ * 把那句话显示在输入框下方当成错误提示 —— 这样输错一次不用关掉再重开弹窗。
+ */
+internal class TextInputDialogSpec(
+    val title: String,
+    val message: String,
+    /** 输入框初始值（改现有记录时是原值，新增时是空串） */
+    val initial: String,
+    /** 空内容时的占位提示 */
+    val hint: String,
+    val confirmText: String,
+    val cancelText: String,
+    val onConfirm: (String) -> Unit,
+    override val anchor: Rect? = null,
+    /** 数字键盘（「第几次」用）；`false` = 普通文本（文件名用） */
+    val numeric: Boolean = false,
+    /** 长度上限，超出直接不接收输入（文件名 120、次数 6 位够用） */
+    val maxChars: Int = 120,
+    val validate: (String) -> String? = { null },
 ) : DialogSpec
 
 /**
@@ -137,6 +196,13 @@ internal class DialogController {
     }
 
     fun showConfirm(s: ConfirmDialogSpec) {
+        afterDismiss = null
+        closing = false
+        spec = s
+    }
+
+    /** 弹出文本输入（贴底、从下往上滑入） */
+    fun showTextInput(s: TextInputDialogSpec) {
         afterDismiss = null
         closing = false
         spec = s

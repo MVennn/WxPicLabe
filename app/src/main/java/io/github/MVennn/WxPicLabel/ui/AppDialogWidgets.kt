@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +42,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -49,8 +52,10 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -198,12 +203,16 @@ internal fun DialogBody(controller: DialogController, spec: DialogSpec) {
                 // 留白）扣，`weight(1f)` 的两颗按钮宽度是算出来的。
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                DialogButton(
-                    text = spec.cancelText,
-                    emphasized = false,
-                    onClick = { controller.dismiss() },
-                    modifier = Modifier.weight(1f),
-                )
+                // 取消位可以为空：纯说明卡（如「旧版记录为什么改不了」）只有一颗「知道了」，
+                // 画一半空白按钮只会让人以为少渲染了一个
+                if (spec.cancelText.isNotEmpty()) {
+                    DialogButton(
+                        text = spec.cancelText,
+                        emphasized = false,
+                        onClick = { controller.dismiss() },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 DialogButton(
                     text = spec.confirmText,
                     emphasized = true,
@@ -211,6 +220,125 @@ internal fun DialogBody(controller: DialogController, spec: DialogSpec) {
                     onClick = { controller.dismiss { spec.onConfirm() } },
                     modifier = Modifier.weight(1f),
                 )
+            }
+        }
+
+        // 文本输入：标题 / 说明的排版与确认弹窗完全一致（同一套 18:15 字号 + 12dp 节奏），
+        // 中间多一个输入框。校验不通过就在这里补一行红字，**不关弹窗** ——
+        // 用户输错「第几次」不该被退回列表再点开一次。
+        is TextInputDialogSpec -> {
+            // `remember(spec)`：换一条记录再打开要换成新的初始值；
+            // 但同一弹窗内的逐字输入不能被外层重组重置。
+            var text by remember(spec) { mutableStateOf(spec.initial) }
+            var error by remember(spec) { mutableStateOf<String?>(null) }
+            val colors = MiuixTheme.colorScheme
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = spec.title,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    color = colors.onSurfaceContainer,
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                )
+                if (spec.message.isNotEmpty()) {
+                    Text(
+                        text = spec.message,
+                        color = colors.onSurfaceContainer,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        // 输入框底色用卡片里第二层的容器色（与 DialogButton 的次要按钮同源），
+                        // 不画描边：贴底弹层本身已经是一张卡片，再套一层框会显脏。
+                        .background(colors.surfaceContainerHighest.copy(alpha = 0.9f))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = {
+                            // 超长直接不接收（文件名上限由调用方给），不截断已有内容
+                            if (it.length <= spec.maxChars) {
+                                text = it
+                                error = null
+                            }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (spec.numeric) {
+                                KeyboardType.Number
+                            } else {
+                                KeyboardType.Text
+                            },
+                        ),
+                        textStyle = TextStyle(color = colors.onSurfaceContainer, fontSize = 16.sp),
+                        cursorBrush = SolidColor(colors.primary),
+                        modifier = Modifier.fillMaxWidth(),
+                        decorationBox = { inner ->
+                            if (text.isEmpty()) {
+                                Text(
+                                    text = spec.hint,
+                                    color = colors.onSurfaceVariantSummary,
+                                    fontSize = 16.sp,
+                                )
+                            }
+                            inner()
+                        },
+                    )
+                }
+                error?.let { msg ->
+                    Text(
+                        text = msg,
+                        color = colors.error,
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    DialogButton(
+                        text = spec.cancelText,
+                        emphasized = false,
+                        onClick = { controller.dismiss() },
+                        modifier = Modifier.weight(1f),
+                    )
+                    DialogButton(
+                        text = spec.confirmText,
+                        emphasized = true,
+                        onClick = {
+                            val value = text.trim()
+                            val bad = spec.validate(value)
+                            if (bad != null) {
+                                error = bad
+                            } else {
+                                // 落配置 / 落动作一律等收起动画播完（见 DialogController.dismiss）
+                                controller.dismiss { spec.onConfirm(value) }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
 

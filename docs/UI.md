@@ -55,7 +55,7 @@ Hook 与数据链路见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 | `LiquidPhysics.kt` | 按压物理三件套（`pressProgress` 驱动 blur↔lens） |
 | `Dock.kt` | 底栏两种形态：`MiuixDock` / `LiquidGlassDock` |
 | `AppDialogHost.kt` | 自绘弹层宿主（`DialogHost`） |
-| `AppDialogSpec.kt` | 弹层规格：`ChoiceDialogSpec` / `ConfirmDialogSpec` / `AgreementDialogSpec` |
+| `AppDialogSpec.kt` | 弹层规格：`Choice` / `Confirm` / `TextInput` / `Image` / `Agreement`（**选型表见 §4**） |
 | `AppDialogWidgets.kt` | 弹层内部件（选项行、按钮组、链接行） |
 | `Widgets.kt` | 通用卡片 / 标题 / 分组 |
 | `GsSwitch.kt` | 自绘开关（几何对齐 Miuix，**不在玻璃体系内**） |
@@ -104,13 +104,28 @@ SettingsActivity
 > 3.1.0 曾试过换成 Miuix `OverlayBottomSheet`（配 activity-compose 1.12.4 修掉
 > ViewTree Owner 缺失的崩溃），因观感与动画手感不合回退为自绘；activity 升级保留。
 
-三种弹层规格：
+五种弹层规格。**选型看形态，不看「能不能跑」** —— 同一个 `ChoiceDialogSpec` 传不传 `anchor`，
+渲染出来就是小菜单和全宽大列表两种完全不同的东西（见下表第一行）：
 
-| 规格 | 用途 | 关键约束 |
+| 规格 | 形态 | 什么时候用 | 硬约束 |
+| --- | --- | --- | --- |
+| `ChoiceDialogSpec` | **锚定小菜单**：宽 `MenuWidth`，右缘对齐触发行，缩放弹出 / 缩回 | 行内**选值**（主题 / 语言 / 日志等级 / 记录的时间范围）与行内**动作菜单**（改文件名 / 改第几次 / 删除这条） | **必须传 `anchor`**。不传不报错，只会退化成全宽居中大列表 —— 形态错了，代码照样编译通过。动作菜单写 `selectedIndex = -1`（不画勾），点了没变化的项走 `disabledIndices` |
+| `ConfirmDialogSpec` | **贴底 sheet**：≤420dp、水平居中、抬到导航条之上 | 不可逆动作的二次确认：删除单条记录、清空台账、重置模块 | `anchor` 恒为 `null`；`message` 必须写清**范围**（见 NAMING §3 例外条） |
+| `TextInputDialogSpec` | 贴底 sheet，与 Confirm 同壳，随键盘上抬 | 就地改一个值：改文件名、改「第几次」 | 只从行内动作菜单 / 按钮进入；**不要拿它做行内选值**（那属于 Choice） |
+| `ImageDialogSpec` | 贴底 sheet | 图片预览 | `anchor` 恒为 `null` |
+| `AgreementDialogSpec` | 贴底 sheet | 首次启动的免责声明门槛 | **不可关闭**，返回键只吞不放行 |
+
+**行尾箭头就是弹层形态的说明书**，三档只有三个含义：
+
+| 箭头 | 含义 | 例子 |
 | --- | --- | --- |
-| `ChoiceDialogSpec` | 主题 / 语言这类多选一 | 选中项打勾，点空白关闭 |
-| `ConfirmDialogSpec` | 「重置模块」这类破坏性操作 | 必须写清**范围**（见 NAMING §3 例外条） |
-| `AgreementDialogSpec` | 首次启动的免责声明门槛 | **不可关闭**，返回键只吞不放行 |
+| `DownArrowIcon()` | **原地**出东西：弹出锚定菜单，或原地展开 / 收起 | 主题、语言、日志等级、记录的时间范围、批次组头、记录行 |
+| `ArrowRightIcon()` | 进入**二级页**，或推进一个会再弹一层的动作（确认 sheet / 文件选择器） | 发送设置、备份与恢复、重置模块、清空记录 |
+| 不画箭头 | 点了**立刻执行**，没有后续界面 | 记录页概览卡（重新拉一次记录） |
+
+> 反例（2026-11 记录页踩过，三处同时犯）：行内动作菜单不传 `anchor` → 变成屏幕正中的全宽列表；
+> 原地展开的组头在收起态画 →，让人以为点进去是另一个页面；删除直接在菜单项里执行，没有二次确认。
+> 判据很简单：**弹层形态和箭头语义对不上，就是选错了规格**。
 
 ---
 
@@ -153,6 +168,9 @@ SettingsActivity
 3. **文案按 [NAMING.md](NAMING.md) 起名**，中英两份 `strings.xml` 同步改。
 4. **改完必须真机看一遍**：Compose 的布局问题（裁切、闪白、重复测量）编译期零报错。
 5. **不要顺手改动画参数**：曲线与时长是逐次调出来的，改动前先看 `AnimCurves.kt` 的注释。
+6. **新增弹层先过 §4 选型表**，别按「哪个能传这几个参数就用哪个」挑：贴底 sheet 与锚定小菜单是两种形态，
+   `ChoiceDialogSpec` 漏传 `anchor` 也只是静默退化，编译和运行都不报错。
+7. **行尾箭头跟着形态走**（§4 箭头表）：原地弹窗 / 原地展开用 ↓，进二级页或推进式动作才用 →，点了立即执行就不画。
 
 ---
 

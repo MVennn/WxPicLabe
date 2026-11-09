@@ -8,6 +8,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Binder
 import android.os.Process
+import io.github.MVennn.WxPicLabel.core.ConfigKeys
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -18,11 +19,19 @@ import org.json.JSONObject
  * `UnsupportedOperationException("Read only implementation")`，上游 javadoc 原文
  * "read-only in hooked apps"），所以名单只能走这条 Provider。
  *
- * 协议（`insert content://<pkg>.bridge/friends`）：
+ * 协议（`insert content://<pkg>.bridge/<path>`）：
  *
- *  - `chunk`：一批条目的 JSON 片段（`{"id":..,"name":..,"kind":0},` 尾带逗号）
- *  - `index` / `total`：分片序号与总数（每批 ≤200 条，避开 Binder ~1MB 上限）
- *  - 收到 `index == total - 1` 时按序拼接完整 JSON 全量落盘
+ *  - `chunk`：一段 JSON 文本片段
+ *  - `index` / `total`：分片序号与总数（避开 Binder ~1MB 上限）
+ *  - 收到 `index == total - 1` 时按序拼接，全量落盘
+ *
+ * 两条路径的片段**形态不同**：
+ *
+ *  - `friends`：片段是「条目 + 尾逗号」，Provider 套上
+ *    `{"fetchedAt":..,"friends":[ .. ]}` 外壳，每片 ≤200 条。
+ *  - `records`：片段是**整份文档的字符切片**（发送记录既要聚合计数表
+ *    又要逐次台账，由 `RecordExporter` 一次拼好），Provider 只按序拼接、
+ *    **不加任何外壳** —— 它不需要懂 JSON 结构，以后换字段也不用改这里。
  *
  * 安全：exported 且**不声明** android:permission —— 微信没有本模块签名，
  * signature 级自定义权限会把微信直接挡死（[DebugConfigProvider] 的注释记录过同一个坑）。
@@ -105,10 +114,11 @@ class FriendBridgeProvider : ContentProvider() {
                     sb.append(store.getString(pendingPrefix + i, ""))
                 }
                 val now = System.currentTimeMillis()
+                // friends 由这里套外壳；records 的片段本身就是完整文档，原样拼接
                 val json = if (isFriends) {
                     "{\"fetchedAt\":$now,\"friends\":[$sb]}"
                 } else {
-                    "{\"at\":$now,\"records\":[$sb]}"
+                    sb.toString()
                 }
                 val e = store.edit()
                     .putString(targetKey, json)
@@ -189,37 +199,218 @@ object FriendStore {
 }
 
 /**
- * 模块 App 侧的**发送记录**读取口（同名图片计数表）。
+ * 模块 App 侧的**发送记录**读取口。
  *
- * 与 [FriendStore] 同一套做法：微信进程把计数表经 Provider 回传，
- * 这里只读本机快照。记录不是用户配置，所以不进 remote preferences、不进备份。
+ * 与 [FriendStore] 同一套做法：微信进程把整份文档（聚合计数表 + 逐次台账）经
+ * Provider 回传，这里只读本机快照。记录不是用户配置，所以不进 remote preferences、
+ * 不进备份。
+ *
+ * ## 为什么还要聚合计数表
+ *
+ * 台账只留最近 600 条（按时间淘汰），聚合表才是「这张图一共发过几次」。
+ * 概览行的总条数也从台账数，两边口径不同、都要保留。
  */
 object RecordStore {
 
-    /** 一条记录：发出去的文字、发过几次、最后一次的毫秒时间戳。 */
+    /**
+     * 旧版记录用的「批次」占位值，与 RepeatCounter.BATCH_MIGRATED 同一个字面量。
+     *
+     * 迁移条目和 app 侧合成条目都带它：**它不是真实批次**，界面分组时必须当成
+     * 「没有批次」按时间窗兜底，否则整段历史会挤成一组（看着就像没有分组）。
+     */
+    const val BATCH_MIGRATED = "m"
+
+    /** 一条聚合记录：发出去的文字、发过几次、最后一次的毫秒时间戳。 */
     data class Row(val label: String, val count: Int, val lastMs: Long)
 
-    data class Book(val at: Long, val rows: List<Row>)
+    /**
+     * 一条逐次发送事件。
+     *
+     * [seq] 为 0 表示这条是从旧版聚合表现拼出来的（老版本回传的文档没有台账），
+     * 台账里没有对应条目，改不了也删不掉 —— 界面按只读处理（[editable]）。
+     */
+    data class Event(
+        val seq: Long,
+        val at: Long,
+        val label: String,
+        val n: Int,
+        val batch: String,
+    ) {
+        val editable: Boolean get() = seq > 0L
+    }
+
+    data class Book(
+        val at: Long,
+        val edited: String,
+        val rows: List<Row>,
+        val events: List<Event>,
+    ) {
+        val isEmpty: Boolean get() = events.isEmpty() && rows.isEmpty()
+    }
 
     fun read(context: Context): Book {
         val sp = context.getSharedPreferences("wxpiclabel_friends", Context.MODE_PRIVATE)
         val json = sp.getString("records_json", "") ?: ""
         val at = sp.getLong("records_at", 0L)
         if (json.isEmpty()) {
-            return Book(0L, emptyList())
+            return Book(0L, "", emptyList(), emptyList())
         }
         return try {
-            val arr = JSONObject(json).optJSONArray("records") ?: JSONArray()
-            val out = ArrayList<Row>(arr.length())
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
+            val root = JSONObject(json)
+            val edited = root.optString("edited", "")
+            val rowsArr = root.optJSONArray("records") ?: JSONArray()
+            val rows = ArrayList<Row>(rowsArr.length())
+            for (i in 0 until rowsArr.length()) {
+                val o = rowsArr.optJSONObject(i) ?: continue
                 val label = o.optString("label", "")
                 if (label.isEmpty()) continue
-                out.add(Row(label, o.optInt("count", 0), o.optLong("last", 0L)))
+                rows.add(Row(label, o.optInt("count", 0), o.optLong("last", 0L)))
             }
-            Book(at, out)
+            val evArr = root.optJSONArray("events")
+            val events = ArrayList<Event>()
+            if (evArr != null) {
+                for (i in 0 until evArr.length()) {
+                    val o = evArr.optJSONObject(i) ?: continue
+                    val label = o.optString("l", "")
+                    if (label.isEmpty()) continue
+                    events.add(
+                        Event(
+                            seq = o.optLong("s", 0L),
+                            at = o.optLong("t", 0L),
+                            label = label,
+                            n = o.optInt("n", 0),
+                            batch = o.optString("b", ""),
+                        )
+                    )
+                }
+            }
+            Book(at, edited, rows, if (events.isEmpty()) synth(rows) else events)
         } catch (t: Throwable) {
-            Book(0L, emptyList())
+            Book(0L, "", emptyList(), emptyList())
         }
+    }
+
+    /** 老文档没有台账：按聚合表拼出占位事件，至少让界面有东西可看（不可编辑）。 */
+    private fun synth(rows: List<Row>): List<Event> {
+        val out = ArrayList<Event>()
+        for (r in rows) {
+            for (i in 1..r.count.coerceAtLeast(0)) {
+                out.add(Event(0L, r.lastMs, r.label, i, BATCH_MIGRATED))
+            }
+        }
+        out.sortWith(compareBy({ it.at }, { it.label }, { it.n }))
+        return out
+    }
+}
+
+/**
+ * 「发送记录」的手工修改：改名字 / 改第几次 / 删除。
+ *
+ * ## 为什么是单向动作、不是双向同步
+ *
+ * 台账在微信进程里，模块 App 写不进去；跨进程只有 remote preferences 这一条
+ * 「模块 App 写 → 微信进程读」的路，目标进程侧的 `edit()` 直接抛异常。
+ * 所以这里只存**动作串**，微信进程轮询到令牌变了就把整组动作重新应用一遍
+ * （`RepeatCounter.applyEdits`，幂等）。
+ *
+ * 动作语法（竖线分隔，都是短串）：
+ *
+ *  - `d|<seq>`：删掉这条事件
+ *  - `l|<seq>|<新名字>`：改名字
+ *  - `n|<seq>|<次数>`：改「第几次」
+ *
+ * ## 同一 seq 只留一条动作
+ *
+ * 先把同一 seq 的旧动作剔掉再追加 —— StringSet 没有顺序，否则「改名 A」和
+ * 「改名 B」谁生效全看哈希顺序。
+ *
+ * ## 什么时候能丢
+ *
+ * 动作应用过之后留着是无害的空转（幂等），但集合会慢慢涨。超过 [MAX_OPS] 条时
+ * 清理「seq 已经不在快照里」的动作：那种效果已经落进台账，再发也改不动什么了。
+ */
+object RecordEdits {
+
+    private const val PREFS = "wxpiclabel_record_edits"
+    private const val KEY_OPS = "ops"
+
+    /** 动作条数上限；超过就清掉一批已生效的。 */
+    private const val MAX_OPS = 200
+
+    fun read(context: Context): Set<String> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet(KEY_OPS, emptySet()) ?: emptySet()
+        return HashSet(raw)
+    }
+
+    /** 追加一条动作（同 seq 覆盖），并推给微信进程。返回写入后的全集。 */
+    fun commit(context: Context, op: String): Set<String> {
+        val seq = op.split('|').getOrNull(1)
+        val next = HashSet<String>()
+        for (cur in read(context)) {
+            if (seq != null && cur.split('|').getOrNull(1) == seq) {
+                continue
+            }
+            next.add(cur)
+        }
+        next.add(op)
+        return write(context, next)
+    }
+
+    /** 清空全部动作（「清空发送记录」时用；台账本身另走 RESET 令牌清）。 */
+    fun clear(context: Context): Set<String> {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        return write(context, emptySet())
+    }
+
+    /** 把动作套在快照上，供界面先看结果；口径与 `RepeatCounter.applyEdits` 一致。 */
+    fun apply(events: List<RecordStore.Event>, ops: Set<String>): List<RecordStore.Event> {
+        if (ops.isEmpty()) return events
+        val drop = HashSet<Long>()
+        val rename = HashMap<Long, String>()
+        val nth = HashMap<Long, Int>()
+        for (op in ops) {
+            val p = op.split('|')
+            if (p.size < 2) continue
+            val seq = p[1].toLongOrNull() ?: continue
+            when (p[0]) {
+                "d" -> drop.add(seq)
+                "l" -> if (p.size >= 3 && p[2].isNotEmpty()) rename[seq] = p[2]
+                "n" -> if (p.size >= 3) p[2].toIntOrNull()?.let { nth[seq] = it }
+            }
+        }
+        if (drop.isEmpty() && rename.isEmpty() && nth.isEmpty()) return events
+        val out = ArrayList<RecordStore.Event>(events.size)
+        for (ev in events) {
+            if (drop.contains(ev.seq)) continue
+            val label = rename[ev.seq] ?: ev.label
+            val n = nth[ev.seq] ?: ev.n
+            out.add(if (label == ev.label && n == ev.n) ev else ev.copy(label = label, n = n))
+        }
+        return out
+    }
+
+    /** 动作太多时丢掉「seq 已不在快照里」的那些（效果已经落在台账上）。 */
+    fun trim(context: Context, liveSeqs: Set<Long>) {
+        val ops = read(context)
+        if (ops.size <= MAX_OPS) return
+        val keep = HashSet<String>()
+        for (op in ops) {
+            val seq = op.split('|').getOrNull(1)?.toLongOrNull()
+            if (seq == null || liveSeqs.contains(seq)) keep.add(op)
+        }
+        if (keep.size != ops.size) write(context, keep)
+    }
+
+    /** 落本机副本 + 推给微信进程（写动作集合，再换令牌）。 */
+    private fun write(context: Context, ops: Set<String>): Set<String> {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putStringSet(KEY_OPS, ops)
+            .apply()
+        ModulePreferences.edit {
+            putStringSet(ConfigKeys.IMG_LABEL_RECORD_EDITS, ops)
+            putString(ConfigKeys.IMG_LABEL_RECORD_EDITS_TOKEN, System.currentTimeMillis().toString())
+        }
+        return ops
     }
 }

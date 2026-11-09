@@ -83,10 +83,15 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
   （否则「刷新名单」这类单向令牌永远不生效，见 `docs/PITFALLS.md` 第 20 条）；重取失败沿用上一份。
 - 同名图片计数存在**微信进程自己的** SharedPreferences（`wxpiclabel_repeat.xml`）：
   remote preferences 写不进去、模块 App 的目录跨 uid 不可写，这是唯一能落盘的地方。
-- 「清空发送记录」是**单向令牌**：设置页写一个毫秒时间戳，微信进程每次计数前比对，变了就整体清空。
-- **发送记录查看**走另一条单向令牌（`img_label_record_dump`）：设置页写令牌 → 微信进程轮询到变化就把
-  计数表经 FriendBridgeProvider 的 `/records` 回传（同一条分片协议），模块 App 的 `RecordStore` 落盘、
-  「发送记录」页展示。每批发完也会推一份，保证页面数据新鲜。
+- 那份 prefs 里同时存两套数据：`n:<名字> = 次数|最后时间`（聚合表，只决定 `+N` 文案）与
+  `e:<seq> = 时间|次数|批次|名字`（逐次台账，记录页的一切都来自它），元键 `__seq` / `__edits` /
+  `__migrated` / `__reset`。两者的写入口都在 `RepeatCounter`，细节见 `docs/IMAGE-RECORD.md`。
+- 「清空发送记录」和「编辑记录」都是**单向令牌**：设置页写毫秒时间戳，微信进程轮询到变化才动手——
+  清空整体重来，编辑把动作串重放一遍（幂等），改完按台账剩余最大次数反推聚合表。
+- **发送记录回传**走令牌 `img_label_record_dump`：微信进程把「聚合表 + 台账 + 已应用编辑」拼成一份
+  JSON 文档，按**字符**切成 ≤3000 字的片经 `/records` 送过去（Provider 只按序拼接、**不加外壳**；
+  `/friends` 走的是 200 条一片的另一套协议），模块 App 的 `RecordStore` 落盘、「发送记录」页展示。
+  每批发完也会推一份。
 
 ## 降级策略
 

@@ -112,6 +112,22 @@ object ConfigKeys {
      */
     const val IMG_LABEL_RECORD_DUMP = "img_label_record_dump"
 
+    /**
+     * 「发送记录」的手工修改动作（StringSet），一条一个动作，三种语法：
+     *
+     *  - `d|<seq>` 删除这条记录；
+     *  - `l|<seq>|<新名字>` 改这条记录发出去的文字；
+     *  - `n|<seq>|<次数>` 改这条记录是「第几次」。
+     *
+     * `<seq>` 是微信进程给每次发送分配的序号（见 RepeatCounter 的 Event）。
+     * 微信进程读到新令牌后把**整套动作重新应用一遍**（三种动作都幂等），再回传改完的台账 ——
+     * 于是「改第几次 / 删一条」会真的影响下一次发送的 +N 编号，而不是只改界面显示。
+     */
+    const val IMG_LABEL_RECORD_EDITS = "img_label_record_edits"
+
+    /** [IMG_LABEL_RECORD_EDITS] 的变更令牌（毫秒时间戳）；变了才重新应用一次。 */
+    const val IMG_LABEL_RECORD_EDITS_TOKEN = "img_label_record_edits_token"
+
 
     /**
      * 是否已阅读并同意免责声明。
@@ -216,6 +232,11 @@ object ConfigKeys {
 
     const val DEFAULT_IMG_LABEL_RECORD_DUMP = ""
 
+    /** 默认没有任何手工修改动作（空表） */
+    val DEFAULT_IMG_LABEL_RECORD_EDITS: Set<String> = emptySet()
+
+    const val DEFAULT_IMG_LABEL_RECORD_EDITS_TOKEN = ""
+
     const val DEFAULT_DESKTOP_ICON = true
 
     /** 默认 INFO：既能看到关键链路，又不至于刷屏 */
@@ -256,6 +277,7 @@ object ConfigKeys {
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
+        IMG_LABEL_RECORD_EDITS, IMG_LABEL_RECORD_EDITS_TOKEN,
         DESKTOP_ICON, LIQUID_GLASS, GLASS_EFFECT, LANGUAGE, THEME, PREDICTIVE_BACK,
         LOG_LEVEL,
     )
@@ -279,6 +301,7 @@ object ConfigKeys {
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
+        IMG_LABEL_RECORD_EDITS, IMG_LABEL_RECORD_EDITS_TOKEN,
     )
 
     /**
@@ -300,6 +323,7 @@ object ConfigKeys {
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
+        IMG_LABEL_RECORD_EDITS, IMG_LABEL_RECORD_EDITS_TOKEN,
         LOG_LEVEL,
     )
 
@@ -321,6 +345,8 @@ object ConfigKeys {
         IMG_LABEL_KEEP_SCREEN_ON to DEFAULT_IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES to DEFAULT_IMG_LABEL_RENAME_RULES,
         IMG_LABEL_RECORD_DUMP to DEFAULT_IMG_LABEL_RECORD_DUMP,
+        IMG_LABEL_RECORD_EDITS to DEFAULT_IMG_LABEL_RECORD_EDITS,
+        IMG_LABEL_RECORD_EDITS_TOKEN to DEFAULT_IMG_LABEL_RECORD_EDITS_TOKEN,
         DESKTOP_ICON to DEFAULT_DESKTOP_ICON,
         LIQUID_GLASS to DEFAULT_LIQUID_GLASS,
         GLASS_EFFECT to DEFAULT_GLASS_EFFECT,

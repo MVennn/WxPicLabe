@@ -135,7 +135,7 @@ internal fun ImgLabelRenameScreen() {
                 title = stringResource(R.string.rename_save),
                 // 状态类副标题留（已保存 / 已导入…），说明类删（docs/NAMING.md §3）
                 summary = status.takeIf { it.isNotEmpty() },
-                endActions = { ArrowRightIcon() },
+                // 点了立即保存、结果回显在副标题，没有后续界面 —— 不带箭头
                 onClick = { save() },
             )
             BasicComponent(
@@ -150,7 +150,7 @@ internal fun ImgLabelRenameScreen() {
             )
             BasicComponent(
                 title = stringResource(R.string.rename_copy),
-                endActions = { ArrowRightIcon() },
+                // 复制是就地生效，没有后续界面 —— 不带箭头
                 onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("wxpiclabel-rename", text))
@@ -159,7 +159,7 @@ internal fun ImgLabelRenameScreen() {
             )
             BasicComponent(
                 title = stringResource(R.string.rename_paste),
-                endActions = { ArrowRightIcon() },
+                // 粘贴把内容填进上面的编辑框，结果就在本页 —— 不带箭头
                 onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     val clip = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()

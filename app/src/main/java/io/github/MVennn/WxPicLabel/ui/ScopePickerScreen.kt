@@ -128,7 +128,8 @@ internal fun ScopePickerScreen() {
                     stringResource(R.string.scope_total_count, book.entries.size) +
                         " · " + stringResource(R.string.scope_updated_at, updatedAt)
                 },
-                endActions = { ArrowRightIcon() },
+                // 原地展开 / 收起选中列表 —— 朝下箭头
+                endActions = { DownArrowIcon() },
                 onClick = { expanded = !expanded },
             )
             AnimatedVisibility(expanded) {
@@ -155,7 +156,7 @@ internal fun ScopePickerScreen() {
                 title = stringResource(R.string.scope_refresh_entry),
                 // 说明类副标题删；只留「正在刷新名单…」这个状态（docs/NAMING.md §3）
                 summary = if (refreshing) stringResource(R.string.scope_refreshing) else null,
-                endActions = { ArrowRightIcon() },
+                // 点了就地重新拉名单，没有后续界面 —— 不带箭头
                 onClick = { requestRefresh() },
             )
         }

@@ -32,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -213,11 +214,16 @@ internal fun LiquidGlassDock(
             (constraints.maxWidth.toFloat() - DockInnerPadding.toPx() * 2f) / tabsCount
         }
 
-        // 拖动越界时整条面板的弹性让位：最多 4dp，随越界比例缓出
-        val offsetAnimation = remember { Animatable(0f) }
+        // 拖动越界时整条面板的弹性让位：最多 4dp，随越界比例缓出。
+        //
+        // 拖动过程只写**普通状态**（dragOffset）：回调每个事件都会进来一次，旧写法是
+        // 每个事件都 scope.launch { snapTo(...) }，一秒几十个协程纯属浪费。
+        // 松手后才用一次 [settleOffset] 把累计值接过去、弹簧收回 0 —— 每个手势一个协程。
+        var dragOffset by remember { mutableFloatStateOf(0f) }
+        val settleOffset = remember { Animatable(0f) }
         val panelOffset by remember(density) {
             derivedStateOf {
-                val fraction = (offsetAnimation.value / constraints.maxWidth)
+                val fraction = ((dragOffset + settleOffset.value) / constraints.maxWidth)
                     .fastCoerceIn(-1f, 1f)
                 with(density) {
                     DockInnerPadding.toPx() * fraction.sign * EaseOut.transform(abs(fraction))
@@ -241,7 +247,10 @@ internal fun LiquidGlassDock(
                     currentIndex = targetIndex
                     animateToValue(targetIndex.toFloat())
                     scope.launch {
-                        offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
+                        // 把拖动累计的瞬时值交给动画器接着走，然后弹簧回 0（每个手势仅此一次）
+                        settleOffset.snapTo(dragOffset)
+                        dragOffset = 0f
+                        settleOffset.animateTo(0f, spring(1f, 300f, 0.5f))
                     }
                 },
                 onDrag = { _, dragAmount ->
@@ -249,9 +258,8 @@ internal fun LiquidGlassDock(
                         (targetValue + dragAmount.x / tabWidth)
                             .fastCoerceIn(0f, (tabsCount - 1).toFloat())
                     )
-                    scope.launch {
-                        offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
-                    }
+                    // 直接累加状态：每个拖动事件只写一次状态，不再起协程
+                    dragOffset += dragAmount.x
                 },
             )
         }
