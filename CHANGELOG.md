@@ -2,6 +2,7 @@
 
 ## [0.5.2] - 2026-11-09
 
+- 修复 关掉「桌面图标」后每次覆盖安装 / 更新又自动出现在桌面：alias 在 manifest 改为 `android:enabled="false"`（全新安装默认隐藏），打开图标改走 `COMPONENT_ENABLED_STATE_ENABLED`；隐藏状态写进**独立**本地镜像 `launcher_icon_state`（缺省 false，不写 `ConfigKeys.GROUP`），由静态 `PackageReplacedReceiver`（`ACTION_MY_PACKAGE_REPLACED`，`exported=false`）+ `WxPicApp.onCreate` 两路按镜像重放；设置页开关状态源改读同一份镜像。现象 → 根因 → 怎么避见 `docs/PITFALLS.md` 第 21 条
 - 修复 记录页「回传 N 字但 0 个文件名 / 0 条记录」：解析器原来只有一条严格路径，文档形状一变（分片没拼全 / 顶层键不同 / 元素不是对象）就整份读成空表且不留证据。现在 `RecordStore.read` 三层兜底——严格读 → 别名键与数组元素读（`label|name|l`、`count|n|c`、`last|t|at`，元素支持三元/五元数组）→ 直接在原文上按 `{"label":…,"count":…,"last":…}` / `{"s":…,"t":…,"l":…,"n":…,"b":…}` 形状正则回捞（转义自己还原），后两层只要捞到东西就按结果展示
 - 新增 诊断行按 `Book` 新字段分支到七态，把「为什么空」直接写在页面上：结构不符时报**顶层键名**与原始条目数（`回传 17171 字，但一条都解析不出来（顶层键 fetchedAt,friends；原始 0 / 0 项）`）、空文档单列一态、靠原文回捞时明确写「已按原文回捞 X 个文件名 / Y 条」
 - 修复 刷新中的那 6 秒把诊断行整段藏起来（每次进页都退回「0 个文件名 0 条记录」的空白态，像读不到）—— 只有一次快照都还没有时才显示「正在读取记录…」

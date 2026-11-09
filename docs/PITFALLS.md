@@ -116,3 +116,8 @@
 - **现象**：「刷新名单」按钮写了令牌，微信进程 3 分钟内毫无反应；只有重启微信后那一次轮询会「发现」令牌变了（`lastScopeRefresh` 初始为空）。
 - **根因**：目标进程侧 `getRemotePreferences()` 拿到的是**附着那一刻的快照**，模块 App 后续的写入不会推给已附着的那份 —— 读一万次都是旧值。
 - **怎么避**：`cfgPrefs()` 按 TTL（3 s）重新附着拿新快照；重取失败沿用上一份，**绝不能**因为一次异常把功能判成「关」（`feature_img_label` 是 fail-closed）。
+
+## 21. 关掉桌面图标后，每次覆盖安装又冒出来
+- **现象**：设置里关掉「桌面图标」并隐藏成功，覆盖安装 / 更新 APK 后桌面又出现图标；设置页里开关还显示「关」。
+- **根因**：两层。① 隐藏靠 `PackageManager.setComponentEnabledSetting(alias, DISABLED, DONT_KILL_APP)` 写一条覆盖记录，覆盖安装会清掉它，alias 回落到 manifest 的 `android:enabled="true"`；② 原来只在 `WxPicApp.onCreate` 里按 `ModulePreferences` 同步，更新后用户没打开模块 App 就不执行，而且框架 binder 未连时读到本地缺省 `DEFAULT_DESKTOP_ICON = true`，反而把图标点亮。
+- **怎么避**：alias 在 manifest 改 `android:enabled="false"`，打开图标用 `COMPONENT_ENABLED_STATE_ENABLED`（`DEFAULT` 现在指向 false，再用它等于打不开）；开关值写进**独立** SharedPreferences `launcher_icon_state`（缺省 false）——绝不能写 `ConfigKeys.GROUP`，那个文件会被 `resetToDefaults()` 的 `clear()` 抹掉、被 `migrateLocalToRemote()` 遍历搬到远端，写它还会触发 `notifyChanged()` 与 observe 形成回路；静态 `PackageReplacedReceiver`（`exported=false`）接 `ACTION_MY_PACKAGE_REPLACED` 在更新后按镜像重放，`WxPicApp.onCreate` 兜底，两者都不挂在 `ModulePreferences.observe` 上；设置页开关状态也读同一份镜像，否则会出现「开关显示开、图标却隐藏」。LSPosed 设置入口由 `SettingsActivity` 本体的 `MAIN + MODULE_SETTINGS` 保证，禁用 alias 不影响它。
