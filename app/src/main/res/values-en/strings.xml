@@ -282,7 +282,7 @@
     <string name="record_row_summary">#%1$d · %2$s</string>
     <string name="record_section_actions">Actions</string>
     <!-- Send records: search / filter / group / edit -->
-    <string name="record_section_filter">Search &amp; filter</string>
+    <string name="record_section_filter">Filter</string>
     <string name="record_search_hint">Search name, count or time</string>
     <string name="record_filter_title">Time range</string>
     <string name="record_filter_all">All time</string>

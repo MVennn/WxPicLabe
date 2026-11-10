@@ -250,12 +250,25 @@ SettingsActivity
 | 键盘 | `singleLine` + `ImeAction.Search`，搜索键只收键盘 | 结果是边打边筛，不需要「再确认一次」 |
 | 行数限制 | 无 | 搜索词不该被截断；弹层的 `maxChars` 是另一套语义 |
 
-### 9.2 卡内怎么摆
+### 9.2 页内怎么摆（不进卡）
 
-调用方在 `Card` 里只给 **水平 4dp**（竖向 10dp）：
-壳自带 12dp 左内边距，`4 + 12 = 16dp`，正好和同卡其它行（`BasicComponent` 内部 16dp）的标题落在同一条竖线上。
-直接传 `modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp)` 给 `AppSearchField` 的 `modifier` 参数即可 ——
-`modifier` 在背景之前应用，所以 4dp 落在壳外、12dp 落在壳内。**不要再包一层 `Column`/`Row` 只为了给这个 padding。**
+**搜索框不进 `Card`。** 卡自己有 `surfaceContainer` 底色，搜索框也有一层底色 —— 两层壳叠起来就是
+「框套框」，边界发脏；卡的内边距与框的圆角也对不齐。直接放在页面上：
+
+```kotlin
+AppSearchField(
+    // ...
+    modifier = Modifier.padding(horizontal = CardHMargin, vertical = 4.dp),
+)
+```
+
+- 左右 `CardHMargin`（12dp）= 与同页卡同宽，视觉上是一条「更浅的卡」；
+- 上下 4dp：框高 44dp，与周围卡的 8 / 12dp 间距不打紧；
+- 壳自带 12dp 左内边距 → 文字距屏幕 24dp。与卡内行标题（28dp）差 4dp，这是刻意的：
+  框是独立控件，对齐对象是卡的边缘，不是卡里的标题。**不要再包一层 `Column`/`Row` 只为了给 padding。**
+
+**搜索不要和别的东西同框**：搜索是「筛」，时间范围 / 排序是「条件」，塞进一张卡里看着像同一个控件的两半，
+卡里再套框又多一层壳。记录页现在的摆法是：`SmallTitle(筛选)` → 裸搜索框 → 时间范围卡（各占一层）。
 
 ### 9.3 空结果三件套
 
@@ -280,12 +293,14 @@ AppSearchField(
     onValueChange = { query = it },
     hint = searchHint,            // 兼作无障碍标签，写清「能搜什么」
     clearLabel = searchClearLabel, // strings.xml 的 search_clear，全 App 共用
-    modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
+    modifier = Modifier.padding(horizontal = CardHMargin, vertical = 4.dp),
 )
 ```
 
 ### 9.5 反面清单
 
+- 把搜索框放进 `Card`（卡底色 + 框底色 = 框套框，2026-11 两页都犯过）；
+- 把搜索框与条件行（时间范围 / 排序）塞进同一张卡；
 - 自己 `BasicTextField` + `decorationBox`（本仓已有两处前科，2026-11 清理）；
 - 省 `cursorBrush`；
 - 省 `keyboardOptions`/`keyboardActions`（键盘上会出现「换行」而不是「搜索」）；

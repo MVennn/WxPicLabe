@@ -176,7 +176,7 @@ ctx.getContentResolver().insert(Uri.parse("content://io.github.MVennn.WxPicLabel
 
 「选择好友与群聊」→ 新二级页 `Route.ImgLabelScope`：
 
-- 顶部：搜索框，按**显示名或 wxid** 过滤；实现为全 App 唯一的 `AppSearchField`（[UI.md](UI.md) §9），
+- 中部：搜索框（**裸放、不进卡**，[UI.md](UI.md) §9.2），按**显示名或 wxid** 过滤；实现为全 App 唯一的 `AppSearchField`，
   搜不到时给「名单里没有匹配的会话」而不是一片空白
 - 分组：**群聊** / **好友**，各带「全选」
 - 行：显示名 + 副标题（wxid）+ 行尾对勾（已选才画，见 [UI.md](UI.md) §4 图标表）
@@ -277,7 +277,6 @@ Card
     BasicComponent  （已选的每个会话，点击即取消勾选）/ 「还没勾选任何会话」
 Card
   BasicComponent  刷新名单 / 让微信进程重新抓一遍好友与群聊（刷新中显示「正在刷新名单…」）
-Card
-  搜索框
+AppSearchField     搜索框（裸放，不进卡）
 分组列表（群聊 / 好友）
 ```

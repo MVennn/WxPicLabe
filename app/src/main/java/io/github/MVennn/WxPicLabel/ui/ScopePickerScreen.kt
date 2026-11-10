@@ -159,16 +159,15 @@ internal fun ScopePickerScreen() {
         }
 
         Spacer(Modifier.height(8.dp))
-        Card(modifier = Modifier.cardPadding()) {
-            // 卡内只给 4dp：搜索框自带 12dp 内边距，4 + 12 = 16dp（docs/UI.md §9.2）
-            AppSearchField(
-                value = query,
-                onValueChange = { query = it },
-                hint = stringResource(R.string.scope_search_hint),
-                clearLabel = stringResource(R.string.search_clear),
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
-            )
-        }
+        // 搜索框独立成一块：不放进卡里（卡底色 + 框底色 = 两层壳，边界发脏）。
+        // 左右各 CardHMargin 与卡同宽，上下 4dp —— 形态见 docs/UI.md §9.2
+        AppSearchField(
+            value = query,
+            onValueChange = { query = it },
+            hint = stringResource(R.string.scope_search_hint),
+            clearLabel = stringResource(R.string.search_clear),
+            modifier = Modifier.padding(horizontal = CardHMargin, vertical = 4.dp),
+        )
 
         if (book.entries.isEmpty()) {
             SmallTitle(stringResource(R.string.scope_section_empty))

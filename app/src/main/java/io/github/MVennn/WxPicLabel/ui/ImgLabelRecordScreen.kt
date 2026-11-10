@@ -420,18 +420,19 @@ internal fun ImgLabelRecordScreen() {
             )
         }
 
-        // ---- 搜索 + 时间范围
+        // ---- 筛选：搜索框裸放（不进卡）+ 时间范围一行
+        // 卡本身有底色，再把带底色、带圆角的搜索框塞进去就是「框套框」两层壳，边界发脏；
+        // 页内搜索框一律裸放，左右各给 CardHMargin（与卡同宽），上下 4dp（docs/UI.md §9.2）
         SmallTitle(stringResource(R.string.record_section_filter))
+        AppSearchField(
+            value = query,
+            onValueChange = { query = it },
+            hint = searchHint,
+            clearLabel = searchClearLabel,
+            modifier = Modifier.padding(horizontal = CardHMargin, vertical = 4.dp),
+        )
+        Spacer(Modifier.height(8.dp))
         Card(modifier = Modifier.cardPadding()) {
-            // 卡内只给 4dp：搜索框自带 12dp 内边距，4 + 12 = 16dp，
-            // 与同卡下面那行「时间范围」的标题落在同一条竖线上（docs/UI.md §9.2）
-            AppSearchField(
-                value = query,
-                onValueChange = { query = it },
-                hint = searchHint,
-                clearLabel = searchClearLabel,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
-            )
             BasicComponent(
                 title = filterTitle,
                 modifier = Modifier.onGloballyPositioned { rangeAnchor = it.boundsInWindow() },
