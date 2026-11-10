@@ -48,11 +48,14 @@ internal sealed interface Route {
     data object ImgLabelRename : Route
     /** 三级：发送记录（同名图片计数表） */
     data object ImgLabelRecord : Route
+    /** 三级：文字过滤（黑白名单） */
+    data object ImgLabelFilter : Route
 }
 
 /** 三级页 → 它压在下面的那个二级页；不是三级页返回 null。 */
 private fun editParent(route: Route): Route? = when (route) {
-    Route.ImgLabelScope, Route.ImgLabelRename, Route.ImgLabelRecord -> Route.ImgLabelSend
+    Route.ImgLabelScope, Route.ImgLabelRename, Route.ImgLabelRecord,
+    Route.ImgLabelFilter -> Route.ImgLabelSend
     else -> null
 }
 
@@ -75,6 +78,7 @@ private object RouteSaver : Saver<Route, String> {
         Route.ImgLabelScope -> "img_label_scope"
         Route.ImgLabelRename -> "img_label_rename"
         Route.ImgLabelRecord -> "img_label_record"
+        Route.ImgLabelFilter -> "img_label_filter"
     }
 
     override fun restore(value: String): Route = when (value) {
@@ -84,6 +88,7 @@ private object RouteSaver : Saver<Route, String> {
         "img_label_scope" -> Route.ImgLabelScope
         "img_label_rename" -> Route.ImgLabelRename
         "img_label_record" -> Route.ImgLabelRecord
+        "img_label_filter" -> Route.ImgLabelFilter
         else -> Route.Home
     }
 }
@@ -297,6 +302,7 @@ internal fun MainScreen(initialRoute: Route = Route.Home) {
                                 onOpenScope = { route = Route.ImgLabelScope },
                                 onOpenRecord = { route = Route.ImgLabelRecord },
                                 onOpenRename = { route = Route.ImgLabelRename },
+                                onOpenFilter = { route = Route.ImgLabelFilter },
                             )
                         }
 
@@ -333,6 +339,13 @@ internal fun MainScreen(initialRoute: Route = Route.Home) {
                                 onBack = { route = Route.ImgLabelSend },
                             ) {
                                 ImgLabelRecordScreen()
+                            }
+
+                            Route.ImgLabelFilter -> SubScreen(
+                                title = stringResource(R.string.img_label_filter_title),
+                                onBack = { route = Route.ImgLabelSend },
+                            ) {
+                                ImgLabelFilterScreen()
                             }
 
                             else -> Unit

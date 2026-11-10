@@ -305,6 +305,28 @@ internal object AppIcons {
     }
 
     /**
+     * 细描边 ＋（新建一个取值项，与 [Close] 同一张卡里并排时用）。
+     *
+     * 为什么不用 [Add]：`Add` 是 Material 24dp 网格的**填充**十字，实际墨迹约 14dp，
+     * 而同一张卡里的 ✕ 只有 10dp —— 两个行尾动作上下相邻，一个大一圈一个小一圈，
+     * 用户一眼就看出「加号和 ✕ 没对齐、大小也不一样」（2026-11 黑白名单页）。
+     *
+     * 这里与 [Close] **完全同参**：同画布 10 × 10.7dp、同中心 (5, 5.35)、同描边 1.4dp，
+     * 只是把两条对角线换成一条横一条竖 —— 两颗图标摆在任何一列上都等大等粗。
+     */
+    val PlusThin: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        strokedIconOf(
+            name = "PlusThin",
+            width = 10.dp,
+            height = 10.7.dp,
+            pathData = "M5,1 L5,9.7 M1,5.35 L9,5.35",
+            viewportWidth = 10f,
+            viewportHeight = 10.7f,
+            strokeWidth = 1.4f,
+        )
+    }
+
+    /**
      * 圆形对勾（概览页状态卡：模块已激活）。
      *
      * 两段子路径共用同一套描边参数：外圈圆 + 里面的勾。

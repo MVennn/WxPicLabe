@@ -105,6 +105,36 @@ object ConfigKeys {
     const val IMG_LABEL_RENAME_RULES = "img_label_rename_rules"
 
     /**
+     * 「文字过滤」模式，取值见 [FILTER_MODE_VALUES]：关闭 / 白名单 / 黑名单。
+     *
+     * 白名单 = 只有命中关键字的图才带文字发出去（其余只发图）；黑名单 = 命中关键字的图只发图
+     * （其余照常带文字）。关闭时完全不做判断，与没有这个功能等价。
+     *
+     * 判定发生在**计数之前**（见 WxPicLabelModule#textFor）：被过滤掉的图既不 +N、也不进发送记录，
+     * 否则下次发同一张图会凭空跳号。
+     */
+    const val IMG_LABEL_FILTER_MODE = "img_label_filter_mode"
+
+    /**
+     * 关键字表：一行一条，井号开头是注释。
+     *
+     * 不含通配符按**子串包含**匹配；含星号 / 问号按整段通配匹配。整表存成一个字符串，
+     * 理由同 [IMG_LABEL_RENAME_RULES]：一行一条就是文件的全部内容，导入导出最省事。
+     */
+    const val IMG_LABEL_FILTER_RULES = "img_label_filter_rules"
+
+    /** 关键字匹配是否忽略大小写（默认开；中文不受影响，英文截图名常见全大写） */
+    const val IMG_LABEL_FILTER_IGNORE_CASE = "img_label_filter_ignore_case"
+
+    /**
+     * 是否连**原始文件名**一起参与匹配（默认开）。
+     *
+     * 关掉就只看重命名后的最终文字 —— 适合「规则表已经把名字改成人话、
+     * 不想让 IMG_20260101_… 这种机器名影响判断」的场景。
+     */
+    const val IMG_LABEL_FILTER_MATCH_ORIGINAL = "img_label_filter_match_original"
+
+    /**
      * 「发送记录」回传令牌（毫秒时间戳）。
      *
      * 与清空令牌同一套单向通知：设置页每点一次「刷新」写一个新值，
@@ -198,6 +228,25 @@ object ConfigKeys {
     /** 深色模式下拉框的取值顺序，与 `R.array.theme_labels` 一一对应：跟随系统 / 亮色 / 暗色 */
     val THEME_VALUES = arrayOf(THEME_SYSTEM, THEME_LIGHT, THEME_DARK)
 
+    // ---------------------------------------------------------------- 文字过滤取值
+
+    /** 关闭：不做任何判断，每张图都照常发文字 */
+    const val FILTER_MODE_OFF = "off"
+
+    /** 白名单：命中关键字的图才发文字 */
+    const val FILTER_MODE_WHITELIST = "white"
+
+    /** 黑名单：命中关键字的图只发图 */
+    const val FILTER_MODE_BLACKLIST = "black"
+
+    /**
+     * 文字过滤的取值集合：关闭 / 白名单 / 黑名单。
+     *
+     * 设置页那行开关只用白名单与黑名单两档（关 = 白名单、开 = 黑名单），
+     * 「关闭」留作老版本配置的兼容读写 —— 判定与解析都不认它以外的新值时按关闭处理。
+     */
+    val FILTER_MODE_VALUES = arrayOf(FILTER_MODE_OFF, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST)
+
     // ---------------------------------------------------------------- 默认值
 
     /**
@@ -229,6 +278,15 @@ object ConfigKeys {
     const val DEFAULT_IMG_LABEL_KEEP_SCREEN_ON = true
 
     const val DEFAULT_IMG_LABEL_RENAME_RULES = ""
+
+    /** 默认关闭：装了不动，行为与原生一致 */
+    const val DEFAULT_IMG_LABEL_FILTER_MODE = FILTER_MODE_OFF
+
+    const val DEFAULT_IMG_LABEL_FILTER_RULES = ""
+
+    const val DEFAULT_IMG_LABEL_FILTER_IGNORE_CASE = true
+
+    const val DEFAULT_IMG_LABEL_FILTER_MATCH_ORIGINAL = true
 
     const val DEFAULT_IMG_LABEL_RECORD_DUMP = ""
 
@@ -276,7 +334,10 @@ object ConfigKeys {
         ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
-        IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
+        IMG_LABEL_RENAME_RULES,
+        IMG_LABEL_FILTER_MODE, IMG_LABEL_FILTER_RULES,
+        IMG_LABEL_FILTER_IGNORE_CASE, IMG_LABEL_FILTER_MATCH_ORIGINAL,
+        IMG_LABEL_RECORD_DUMP,
         IMG_LABEL_RECORD_EDITS, IMG_LABEL_RECORD_EDITS_TOKEN,
         DESKTOP_ICON, LIQUID_GLASS, GLASS_EFFECT, LANGUAGE, THEME, PREDICTIVE_BACK,
         LOG_LEVEL,
@@ -300,7 +361,10 @@ object ConfigKeys {
         IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
-        IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
+        IMG_LABEL_RENAME_RULES,
+        IMG_LABEL_FILTER_MODE, IMG_LABEL_FILTER_RULES,
+        IMG_LABEL_FILTER_IGNORE_CASE, IMG_LABEL_FILTER_MATCH_ORIGINAL,
+        IMG_LABEL_RECORD_DUMP,
         IMG_LABEL_RECORD_EDITS, IMG_LABEL_RECORD_EDITS_TOKEN,
     )
 
@@ -323,6 +387,8 @@ object ConfigKeys {
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
+        IMG_LABEL_FILTER_MODE, IMG_LABEL_FILTER_RULES,
+        IMG_LABEL_FILTER_IGNORE_CASE, IMG_LABEL_FILTER_MATCH_ORIGINAL,
         IMG_LABEL_RECORD_EDITS, IMG_LABEL_RECORD_EDITS_TOKEN,
         LOG_LEVEL,
     )
@@ -344,6 +410,10 @@ object ConfigKeys {
         IMG_LABEL_PROGRESS_TOAST to DEFAULT_IMG_LABEL_PROGRESS_TOAST,
         IMG_LABEL_KEEP_SCREEN_ON to DEFAULT_IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES to DEFAULT_IMG_LABEL_RENAME_RULES,
+        IMG_LABEL_FILTER_MODE to DEFAULT_IMG_LABEL_FILTER_MODE,
+        IMG_LABEL_FILTER_RULES to DEFAULT_IMG_LABEL_FILTER_RULES,
+        IMG_LABEL_FILTER_IGNORE_CASE to DEFAULT_IMG_LABEL_FILTER_IGNORE_CASE,
+        IMG_LABEL_FILTER_MATCH_ORIGINAL to DEFAULT_IMG_LABEL_FILTER_MATCH_ORIGINAL,
         IMG_LABEL_RECORD_DUMP to DEFAULT_IMG_LABEL_RECORD_DUMP,
         IMG_LABEL_RECORD_EDITS to DEFAULT_IMG_LABEL_RECORD_EDITS,
         IMG_LABEL_RECORD_EDITS_TOKEN to DEFAULT_IMG_LABEL_RECORD_EDITS_TOKEN,

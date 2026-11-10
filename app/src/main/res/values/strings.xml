@@ -219,6 +219,7 @@
         <item>调试</item>
     </string-array>
 
+
     <!-- 导出/预览文案：写入规则 JSON 时按当前语言生成，目标进程不再取资源 -->
     <string name="category_img_label">发送</string>
     <string name="feature_img_label_switch">增加 文件名 开关</string>
@@ -322,4 +323,35 @@
     <string name="scope_section_rooms">群聊（%1$d）</string>
     <string name="scope_section_friends">好友（%1$d）</string>
     <string name="scope_search_hint">搜索昵称或微信号</string>
+
+    <!-- ============================ 文字过滤（黑白名单） ============================ -->
+
+    <string name="img_label_section_filter">文字过滤</string>
+    <string name="img_label_filter_title">黑白名单</string>
+    <string name="img_label_filter_entry">黑白名单</string>
+    <string name="img_label_filter_summary_off">关闭</string>
+    <string name="img_label_filter_summary_whitelist">白名单 · %1$d 条关键字</string>
+    <string name="img_label_filter_summary_blacklist">黑名单 · %1$d 条关键字</string>
+    <string name="filter_section_mode">名单</string>
+    <string name="filter_switch_title">黑名单</string>
+    <string name="filter_switch_summary_black">命中的图只发图，其余照常发文字</string>
+    <string name="filter_switch_summary_white">命中的图才发文字，其余只发图</string>
+    <string name="filter_section_match">匹配方式</string>
+    <string name="filter_rules_title">关键字</string>
+    <string name="filter_rules_empty">还没有关键字</string>
+    <string name="filter_rules_empty_summary">现在所有图都照常发文字</string>
+    <string name="filter_new_rule">新建关键字</string>
+    <string name="filter_new_rule_hint">要匹配的文字</string>
+    <string name="filter_new_rule_empty">关键字不能为空</string>
+    <string name="filter_new_rule_exists">这条关键字已经有了</string>
+    <string name="filter_new_rule_added">已添加</string>
+    <string name="filter_rule_deleted">已删除</string>
+    <string name="filter_rule_delete">删除这条关键字</string>
+    <string name="filter_clear_rules">清空关键字</string>
+    <string name="filter_clear_confirm_title">清空关键字</string>
+    <string name="filter_clear_confirm_message">清空后关键字表为空：白名单下所有图片都不再带文字，黑名单下全部照常带文字。</string>
+    <string name="filter_cleared">已清空</string>
+    <string name="filter_ignore_case">忽略大小写</string>
+    <string name="filter_match_original">连原文件名一起匹配</string>
+    <string name="filter_match_original_summary">关掉就只看重命名后的文字</string>
 </resources>

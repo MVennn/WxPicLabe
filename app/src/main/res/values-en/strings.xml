@@ -213,6 +213,7 @@
         <item>Debug</item>
     </string-array>
 
+
     <!-- Export/preview texts: generated in the current language when a rule is saved -->
     <string name="category_img_label">Sending</string>
     <string name="feature_img_label_switch">Add "File name" switch</string>
@@ -316,4 +317,35 @@
     <string name="scope_section_rooms">Groups (%1$d)</string>
     <string name="scope_section_friends">Friends (%1$d)</string>
     <string name="scope_search_hint">Search name or WeChat ID</string>
+
+    <!-- ============================ Keyword filter ============================ -->
+
+    <string name="img_label_section_filter">Text filter</string>
+    <string name="img_label_filter_title">Keyword list</string>
+    <string name="img_label_filter_entry">Keyword list</string>
+    <string name="img_label_filter_summary_off">Off</string>
+    <string name="img_label_filter_summary_whitelist">Whitelist · %1$d rule(s)</string>
+    <string name="img_label_filter_summary_blacklist">Blacklist · %1$d rule(s)</string>
+    <string name="filter_section_mode">Mode</string>
+    <string name="filter_switch_title">Blacklist</string>
+    <string name="filter_switch_summary_black">Matching photos go without text</string>
+    <string name="filter_switch_summary_white">Only matching photos keep their text</string>
+    <string name="filter_section_match">Matching</string>
+    <string name="filter_rules_title">Keywords</string>
+    <string name="filter_rules_empty">No keywords yet</string>
+    <string name="filter_rules_empty_summary">Every photo keeps its text for now</string>
+    <string name="filter_new_rule">New keyword</string>
+    <string name="filter_new_rule_hint">Text to match</string>
+    <string name="filter_new_rule_empty">Keyword cannot be empty</string>
+    <string name="filter_new_rule_exists">That keyword is already there</string>
+    <string name="filter_new_rule_added">Added</string>
+    <string name="filter_rule_deleted">Deleted</string>
+    <string name="filter_rule_delete">Delete this keyword</string>
+    <string name="filter_clear_rules">Clear keywords</string>
+    <string name="filter_clear_confirm_title">Clear keywords</string>
+    <string name="filter_clear_confirm_message">After clearing, the keyword list is empty: in whitelist mode no photo is sent with text, in blacklist mode every photo keeps its text.</string>
+    <string name="filter_cleared">Cleared</string>
+    <string name="filter_ignore_case">Ignore letter case</string>
+    <string name="filter_match_original">Also match the original file name</string>
+    <string name="filter_match_original_summary">Off = only the renamed text is checked</string>
 </resources>

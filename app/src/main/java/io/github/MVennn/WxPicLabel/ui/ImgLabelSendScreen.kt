@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import io.github.MVennn.WxPicLabel.R
 import io.github.MVennn.WxPicLabel.app.ModulePreferences
 import io.github.MVennn.WxPicLabel.core.ConfigKeys
+import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -36,6 +37,7 @@ internal fun ImgLabelSendScreen(
     onOpenScope: () -> Unit = {},
     onOpenRecord: () -> Unit = {},
     onOpenRename: () -> Unit = {},
+    onOpenFilter: () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
 
@@ -58,6 +60,17 @@ internal fun ImgLabelSendScreen(
         ConfigKeys.IMG_LABEL_KEEP_SCREEN_ON,
         ConfigKeys.DEFAULT_IMG_LABEL_KEEP_SCREEN_ON,
     )
+
+    val filterMode by rememberStringPref(
+        ConfigKeys.IMG_LABEL_FILTER_MODE,
+        ConfigKeys.DEFAULT_IMG_LABEL_FILTER_MODE,
+    )
+    val filterRules by rememberStringPref(
+        ConfigKeys.IMG_LABEL_FILTER_RULES,
+        ConfigKeys.DEFAULT_IMG_LABEL_FILTER_RULES,
+    )
+    // 条数只看关键字表，与大小写开关无关；模式为「关闭」时那一行直接显示「关闭」
+    val filterRuleCount = TextFilter.parseRules(filterRules, true).size
 
 
     Column(
@@ -121,6 +134,22 @@ internal fun ImgLabelSendScreen(
                 title = stringResource(R.string.rename_entry),
                 endActions = { ArrowRightIcon() },
                 onClick = onOpenRename,
+            )
+        }
+
+        SmallTitle(stringResource(R.string.img_label_section_filter))
+        Card(modifier = Modifier.cardPadding()) {
+            BasicComponent(
+                title = stringResource(R.string.img_label_filter_entry),
+                summary = when (TextFilter.parseMode(filterMode)) {
+                    TextFilter.MODE_WHITELIST ->
+                        stringResource(R.string.img_label_filter_summary_whitelist, filterRuleCount)
+                    TextFilter.MODE_BLACKLIST ->
+                        stringResource(R.string.img_label_filter_summary_blacklist, filterRuleCount)
+                    else -> stringResource(R.string.img_label_filter_summary_off)
+                },
+                endActions = { ArrowRightIcon() },
+                onClick = onOpenFilter,
             )
         }
 

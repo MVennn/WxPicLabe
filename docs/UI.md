@@ -40,12 +40,16 @@ Hook 与数据链路见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 | `SettingsTab.kt` | 设置页：桌面图标 / 液态玻璃 / 光效 / 语言 / 主题 / 可预测返回 / 重置模块 |
 | `AboutTab.kt` / `AboutHero.kt` | 关于页：作者、许可、免责声明入口 |
 
-**二级页**
+**二级页与三级页**
 
-| 文件 | 职责 |
-| --- | --- |
-| `ImgLabelSendScreen.kt` | 发送设置：重复图片追加次数、清空发送记录 |
-| `MarkdownText.kt` | 免责声明 / 开源声明的 Markdown 渲染 |
+| 文件 | 职责 | 层级 |
+| --- | --- | --- |
+| `ImgLabelSendScreen.kt` | 发送设置：重复图片追加次数、清空发送记录、各三级页入口 | 二级 |
+| `ScopePickerScreen.kt` | 会话白名单勾选 | 三级 |
+| `ImgLabelRenameScreen.kt` | 重命名规则编辑 | 三级 |
+| `ImgLabelRecordScreen.kt` | 发送记录（同名图片计数表） | 三级 |
+| `ImgLabelFilterScreen.kt` | 文字过滤（黑白名单）：开关定名单，关键字逐条增删 | 三级 |
+| `MarkdownText.kt` | 免责声明 / 开源声明的 Markdown 渲染 | 二级 |
 
 **视觉与基础件**
 
@@ -69,24 +73,32 @@ Hook 与数据链路见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 ```text
 SettingsActivity
 └─ MainScreen
-   ├─ HomeScaffold            一级首页（常驻，作为二级页下方的底衬）
+   ├─ HomeScaffold            一级首页（常驻，作为下层页的底衬）
    │  ├─ 顶栏（玻璃或纯色）
    │  ├─ Tab 内容：功能 / 概览 / 设置 / 关于
    │  └─ Dock（两种形态）
-   └─ SubScreen               二级页（按进度右滑进出）
-      ├─ 免责声明
-      ├─ 开源声明
-      └─ 发送设置
+   ├─ SubScreen               二级页（按 subProgress 右滑进出）
+   │  ├─ 免责声明
+   │  ├─ 开源声明
+   │  └─ 发送设置
+   └─ EditScreen              三级页（按 editProgress 压在二级页之上）
+      ├─ 会话白名单
+      ├─ 重命名规则
+      ├─ 发送记录
+      └─ 黑白名单
 ```
 
-**只有两层**。本仓的二级页都是只读长文，没有编辑态也没有三级页，
-所以不保留 GSAuxiliary 那套「二级 / 三级各一条进度」的双层动画 —— 多一层是纯开销。
+**三层，两条独立的滑动进度**（`subProgress` / `editProgress`，都只在 `graphicsLayer` 的 lambda 里读）。
+三级页必须单独占一层：早先版本让三级页顶掉二级页的内容，结果是进三级页没有动画、
+从三级页可预测返回时手势把整层推走、露出首页再弹回发送设置。动画表与判据写在 `Routing.kt` 顶部注释里。
 
 **新增二级页三步**（漏一步 `when` 就编译失败，这是刻意的）：
 
 1. `Route` 加一个 `data object`；
 2. `RouteSaver` 的 `save` / `restore` 各加一个分支；
 3. `MainScreen` 的 `when (shownSub)` 里挂上页面。
+
+**三级页再多一步**：在 `editParent()` 里登记它压在哪个二级页下面 —— 返回目标与「进页面时哪一层该滑」都由这张表决定。
 
 ---
 
@@ -111,7 +123,7 @@ SettingsActivity
 | --- | --- | --- | --- |
 | `ChoiceDialogSpec` | **锚定小菜单**：宽 `MenuWidth`，右缘对齐触发行，缩放弹出 / 缩回 | 行内**选值**（主题 / 语言 / 日志等级 / 记录的时间范围）与行内**动作菜单**（改文件名 / 改第几次 / 删除这条） | **必须传 `anchor`**。不传不报错，只会退化成全宽居中大列表 —— 形态错了，代码照样编译通过。动作菜单写 `selectedIndex = -1`（不画勾），点了没变化的项走 `disabledIndices` |
 | `ConfirmDialogSpec` | **贴底 sheet**：≤420dp、水平居中、抬到导航条之上 | 不可逆动作的二次确认：删除单条记录、清空台账、重置模块 | `anchor` 恒为 `null`；`message` 必须写清**范围**（见 NAMING §3 例外条） |
-| `TextInputDialogSpec` | 贴底 sheet，与 Confirm 同壳，随键盘上抬 | 就地改一个值：改文件名、改「第几次」 | 只从行内动作菜单 / 按钮进入；**不要拿它做行内选值**（那属于 Choice） |
+| `TextInputDialogSpec` | 贴底 sheet，与 Confirm 同壳，随键盘上抬 | 就地改一个值或新增一条：改文件名、改「第几次」、新建关键字 | 只从行内动作菜单 / 按钮进入；**不要拿它做行内选值**（那属于 Choice）。输入非法时在 `validate` 里返回错误文案，弹层不关、错误显示在输入框下方 |
 | `ImageDialogSpec` | 贴底 sheet | 图片预览 | `anchor` 恒为 `null` |
 | `AgreementDialogSpec` | 贴底 sheet | 首次启动的免责声明门槛 | **不可关闭**，返回键只吞不放行 |
 
@@ -126,6 +138,20 @@ SettingsActivity
 > 反例（2026-11 记录页踩过，三处同时犯）：行内动作菜单不传 `anchor` → 变成屏幕正中的全宽列表；
 > 原地展开的组头在收起态画 →，让人以为点进去是另一个页面；删除直接在菜单项里执行，没有二次确认。
 > 判据很简单：**弹层形态和箭头语义对不上，就是选错了规格**。
+
+**行尾除箭头就只有两种图标**，规格抄 GSAuxiliary 的实现（3.2.1 校准，`QuickConfigEditScreen.kt` 的 `RemoveTermButton`）：
+
+| 图标 | 触控区 | 尺寸 | 颜色 | 位置 |
+| --- | --- | --- | --- | --- |
+| `AppIcons.Close` 删一个取值项 | `Box(40.dp).clip(CircleShape)` | **不传 modifier**，尺寸由图标自身声明（10 × 10.7dp） | `onSurfaceVariantActions`，**不用 `error` 红** | `contentAlignment = CenterEnd` —— 墨迹中心落在距行右缘 5dp 那条竖线上，与 `›` / `⌄` 同一列 |
+| `AppIcons.PlusThin` 新建一项 | 同上 `Box(40.dp)` | 不传 modifier（**与 `Close` 同画布** 10 × 10.7dp） | `primary` | 同上 `CenterEnd` —— 与 ✕ 同一列 |
+
+- **同一张卡里并列的行尾动作图标必须同画布同笔画**：✕ 与 ＋ 上下相邻时用 `AppIcons.PlusThin`（细描边十字，与 `Close` 同参），
+  **不要**用 `AppIcons.Add` —— 那是 Material 24dp 网格的填充十字，墨迹约 14dp，和 10dp 的 ✕ 摆一起就是「一大一小、右缘也不齐」
+  （2026-11 黑白名单页因此被打回两次）。两边都要包同样的 `Box(40.dp)` + `CenterEnd`，行高与右缘才会对齐。
+- **✕ 不是红色**：红色留给「整批毁掉」的动作（清空、重置），删一条取值项是轻量操作，用中性色。
+- **不要给行尾图标塞 `Modifier.size()`**：`AppIcons.Close` 是按「与箭头同宽同粗同列」重画的 10dp 叉，一旦被放大就比箭头粗一圈，3.1.1 就是被这个坑过（见 `AppIcons.kt` 注释）。
+- 加了 `contentDescription` 就同时给 `clickable` 写 `onClickLabel`，读屏才念得出一句完整动作。
 
 ---
 
@@ -171,6 +197,14 @@ SettingsActivity
 6. **新增弹层先过 §4 选型表**，别按「哪个能传这几个参数就用哪个」挑：贴底 sheet 与锚定小菜单是两种形态，
    `ChoiceDialogSpec` 漏传 `anchor` 也只是静默退化，编译和运行都不报错。
 7. **行尾箭头跟着形态走**（§4 箭头表）：原地弹窗 / 原地展开用 ↓，进二级页或推进式动作才用 →，点了立即执行就不画。
+8. **卡里不写解释性注释行**：卡内的 `CardNote`、「一行一条」「只影响文字，图片一律照发」这类说明文字，
+   只要上面那行副标题或分区标题已经表达过，就是重复噪音（2026-11 黑白名单页被明确否掉）。
+   语义写进 **行副标题**，卡内只留能点的行 —— 一行字加一句解释凑成两行的卡，就是没想清楚副标题该写什么。
+9. **卡内不画分隔线**：同一张 `Card` 里放多行也**一律不加** `HorizontalDivider`/`VerticalDivider`，分层只靠
+   「拆成多张卡 + 行本身的高度」。判断依据是「这个仓里别的页面有没有」—— 全仓唯一的分隔线曾在黑白名单页出现
+   （0.5dp、`start = 16.dp`，从卡内缩进处起笔像一条分叉），被明确否掉（2026-11）。
+   需要把「列表」和「动作行」分开时，拆成两张 `Card(modifier = Modifier.cardPadding())`，卡与卡之间补一行
+   `Spacer(Modifier.height(12.dp))` —— 这是本仓既有口径（`ImgLabelRecordScreen.kt:517`、`:587`），不补就会贴成一整块。
 
 ---
 

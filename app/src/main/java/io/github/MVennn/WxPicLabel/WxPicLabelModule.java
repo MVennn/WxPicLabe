@@ -30,6 +30,8 @@ import io.github.MVennn.WxPicLabel.feature.imglabel.RecordExporter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RenameRules;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RepeatCounter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.ScopeGate;
+import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter;
+import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.UiHud;
 import io.github.MVennn.WxPicLabel.feature.imglabel.UiSender;
 import io.github.MVennn.WxPicLabel.util.Reflect;
@@ -118,6 +120,10 @@ public class WxPicLabelModule extends XposedModule {
     /** 重命名规则表缓存（原始字符串没变就复用解析结果）。 */
     private volatile java.util.Map<String, String> renameCache;
     private volatile String renameCacheRaw;
+    /** 文字过滤关键字表缓存；大小写开关也参与比对，翻一下就重新解析。 */
+    private volatile java.util.List<TextFilter.Rule> filterCache;
+    private volatile String filterCacheRaw;
+    private volatile boolean filterCacheIgnoreCase;
     /** 已处理过的「回传发送记录」令牌。 */
     private volatile String lastRecordDump;
     /** 当前批次的 id：同一批发送的事件归成一组，记录页按它折叠。 */
@@ -491,7 +497,10 @@ public class WxPicLabelModule extends XposedModule {
                         String label = preLabels != null && preLabels.size() == total
                                 ? preLabels.get(k)
                                 : textFor(entry);
-                        if (!sendLabel(label, idx, total)) {
+                        if (label == null || label.isEmpty()) {
+                            // 空串 = 文字过滤把这一张筛掉了：图照发，文字不发，也不进记录
+                            log("filter: text#" + idx + " skipped by rules");
+                        } else if (!sendLabel(label, idx, total)) {
                             log("takeover: text#" + idx + " not sent");
                         } else {
                             // 确认进了发送队列才记台账：没发出去的不算「第几次」
@@ -1001,8 +1010,13 @@ public class WxPicLabelModule extends XposedModule {
         String label = labels.get(i);
         pendingIndex = i + 1;
         pendingAt = System.currentTimeMillis();
-        boolean ok = UiSender.send(main, label, null);
-        log("fallback: label#" + (i + 1) + "/" + labels.size() + " " + label + " uiSent=" + ok);
+        boolean filtered = label == null || label.isEmpty();
+        boolean ok = !filtered && UiSender.send(main, label, null);
+        if (filtered) {
+            log("filter: fallback label#" + (i + 1) + " skipped by rules");
+        } else {
+            log("fallback: label#" + (i + 1) + "/" + labels.size() + " " + label + " uiSent=" + ok);
+        }
         if (ok) {
             noteSent(label);
         }
@@ -1289,19 +1303,27 @@ public class WxPicLabelModule extends XposedModule {
      * 再算一遍），用按**条目对象身份**的缓存挡住重复计数。
      */
     private String textFor(Object entry) {
-        String label = labelOfEntry(entry);
-        if (label == null || label.isEmpty() || "unknown".equals(label)) {
-            return label;
+        String original = labelOfEntry(entry);
+        if (original == null || original.isEmpty() || "unknown".equals(original)) {
+            return original;
         }
         // 重命名规则：命中就把文件名换成用户指定的文字。
         // 放在计数之前 —— 计数键跟着**实际发出去的那段文字**走，与「认名字不认内容」一致。
-        label = RenameRules.apply(renameRules(), label);
+        String label = RenameRules.apply(renameRules(), original);
         IdentityHashMap<Object, String> cache = batchTexts;
         if (cache != null) {
             String hit = cache.get(entry);
             if (hit != null) {
                 return hit;
             }
+        }
+        // 文字过滤：必须在计数**之前**判 —— 先 bump 再丢弃，下次发同一张图会凭空 +N。
+        // 返回空串表示「这一张只发图」；调用方据此跳过发文字，也不记台账。
+        if (!textAllowed(label, original)) {
+            if (cache != null) {
+                cache.put(entry, "");
+            }
+            return "";
         }
         if (!cfgBool(ConfigKeys.IMG_LABEL_REPEAT_COUNT, ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_COUNT)) {
             return label;
@@ -1318,6 +1340,57 @@ public class WxPicLabelModule extends XposedModule {
         }
         log("repeat: label=" + label + " count=" + n + " text=" + text);
         return text;
+    }
+
+    /**
+     * 文字过滤放行判定：这张图该不该带文字发出去。
+     *
+     * <p>「关闭」直接放行；白名单配了空表也放行 —— 用户刚切到白名单还没写关键字，
+     * 这时把整批文字全吞掉只会让人以为功能坏了（设置页的试算区会照实提示「一条都没写」）。
+     */
+    private boolean textAllowed(String label, String original) {
+        int mode = TextFilter.parseMode(cfgStr(
+                ConfigKeys.IMG_LABEL_FILTER_MODE, ConfigKeys.DEFAULT_IMG_LABEL_FILTER_MODE));
+        if (mode == TextFilter.MODE_OFF) {
+            return true;
+        }
+        java.util.List<TextFilter.Rule> rules = filterRules();
+        if (rules.isEmpty()) {
+            return true;
+        }
+        boolean matchOriginal = cfgBool(ConfigKeys.IMG_LABEL_FILTER_MATCH_ORIGINAL,
+                ConfigKeys.DEFAULT_IMG_LABEL_FILTER_MATCH_ORIGINAL);
+        TextFilter.Rule hit = matchOriginal
+                ? TextFilter.find(rules, label, original)
+                : TextFilter.find(rules, label);
+        boolean allow = mode == TextFilter.MODE_WHITELIST ? hit != null : hit == null;
+        if (!allow) {
+            log("filter: drop mode=" + (mode == TextFilter.MODE_WHITELIST ? "white" : "black")
+                    + " label=" + label + (hit != null ? " hit=" + hit.source : ""));
+        }
+        return allow;
+    }
+
+    /**
+     * 文字过滤关键字表；原文与大小写开关都没变就复用上一次的解析结果。
+     *
+     * <p>缓存比对要带上 ignoreCase：开关一翻，同一张表的匹配结果就变了，只比原文会读旧表。
+     */
+    private java.util.List<TextFilter.Rule> filterRules() {
+        String raw = cfgStr(ConfigKeys.IMG_LABEL_FILTER_RULES,
+                ConfigKeys.DEFAULT_IMG_LABEL_FILTER_RULES);
+        boolean ignoreCase = cfgBool(ConfigKeys.IMG_LABEL_FILTER_IGNORE_CASE,
+                ConfigKeys.DEFAULT_IMG_LABEL_FILTER_IGNORE_CASE);
+        java.util.List<TextFilter.Rule> cached = filterCache;
+        if (cached != null && raw.equals(filterCacheRaw) && ignoreCase == filterCacheIgnoreCase) {
+            return cached;
+        }
+        java.util.List<TextFilter.Rule> parsed = TextFilter.parseRules(raw, ignoreCase);
+        filterCacheRaw = raw;
+        filterCacheIgnoreCase = ignoreCase;
+        filterCache = parsed;
+        log("filter: rules=" + parsed.size() + " ignoreCase=" + ignoreCase);
+        return parsed;
     }
 
     // ------------------------------------------------------------------ talker

@@ -13,6 +13,7 @@
 | [SEND-DESIGN.md](SEND-DESIGN.md) | 发送方案：内部发送面（f9/g9/b3/MsgQuoteItem）实测清单与 A/B 方案对比 |
 | [IMG-LABEL-SEND-SETTINGS.md](IMG-LABEL-SEND-SETTINGS.md) | 发送设置：同一张图重复发送追加 +2/+3 的计数存储、开关层级与改动清单 |
 | [IMG-LABEL-CHAT-SCOPE.md](IMG-LABEL-CHAT-SCOPE.md) | 会话白名单：只对勾选的好友/群聊生效，talker 取法与好友列表抓取通道 |
+| [IMG-LABEL-TEXT-FILTER.md](IMG-LABEL-TEXT-FILTER.md) | 文字过滤：黑白名单在 `textFor` 里怎么判定、为什么必须压在重复计数之前、关键字语法与试算 |
 | [ALBUM-FILENAME-BUTTON.md](ALBUM-FILENAME-BUTTON.md) | 相册「文件名」开关：原图右边的注入点、布局避坑、显隐规则与三道闸 |
 | [IMAGE-RECORD.md](IMAGE-RECORD.md) | 发送记录：逐次台账与聚合计数的双写、`/records` 字符切片回传、改名/改次数/删除的幂等动作串、记录页的搜索与按批次分组 |
 
