@@ -1,8 +1,12 @@
 package io.github.MVennn.WxPicLabel.ui
 
+import android.graphics.Rect
+import android.view.ViewTreeObserver
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,8 +17,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -29,6 +35,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -203,6 +210,25 @@ internal fun DialogHost(
     val menuWidthPx = with(density) { MenuWidth.roundToPx() }
     // 底部弹窗要抬到导航条之上
     val navBottomPx = WindowInsets.navigationBars.getBottom(density).toFloat()
+    // 输入弹层还要再抬到软键盘之上：只按 navBottomPx 抬，卡片会有一半压在键盘底下、
+    // 确定 / 取消那排按钮直接看不见 —— 2026-11 用户截图报的就是这个（不是顶飞，是被盖住）。
+    //
+    // 让位量**不能用 WindowInsets.ime**：那个值在 adjustResize、adjustPan、edge-to-edge
+    // 三种窗口策略下都报全量键盘高度，分不出「系统已经让过没有」。resize 的窗口里系统
+    // 已经缩短了一截，再按 ime 减一次就是双倍让位：卡片被顶到屏幕上半截、离键盘还空
+    // 一大段（GSAuxiliary 2026-11 踩过）。
+    //
+    // 改成量「键盘实际挡住窗口多少像素」：resize 时根视图与可见区同步变矮、差 ≈ 0，
+    // 只在真被盖住时才让位 —— 本模块的 SettingsActivity 是 edge-to-edge，正好是后者。
+    val keyboardOverlapPx = rememberKeyboardOverlapPx()
+    val sheetBottomTarget = maxOf(navBottomPx, keyboardOverlapPx.toFloat()).toInt()
+    // 让位本身也走一小段动画：键盘弹起是瞬时的，卡片跟着瞬移看着就是「跳走」；
+    // 160ms 与弹层入场（DialogMillis = 220ms）错开，看起来是卡片「让开」而不是「弹开」。
+    val sheetBottomPx by animateIntAsState(
+        targetValue = sheetBottomTarget,
+        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+        label = "sheetBottom",
+    )
 
     val anchor = spec.anchor
     // 贴底弹出（下中）：确认弹窗 / 文本输入 / 同意弹窗 / 图片预览，且没有锚点。
@@ -328,7 +354,11 @@ internal fun DialogHost(
                     maxHeight = if (anchor != null) {
                         (height * MenuMaxHeightFraction).toInt().coerceAtLeast(side)
                     } else {
-                        (height - side * 2).coerceAtLeast(side)
+                        // 贴底弹窗再多让出底部那条（导航条 / 键盘），卡片别顶穿它。
+                        // 这里用**目标值**而不是动画中间值：否则让位那 160ms 里卡片会被
+                        // 临时压扁、内容跟着重排，看起来是「抽搐」一下再落位。
+                        (height - side * 2 - if (sheet) sheetBottomTarget else 0)
+                            .coerceAtLeast(side)
                     },
                 ),
             )
@@ -342,7 +372,7 @@ internal fun DialogHost(
                 sheet -> {
                     // 下中：水平一律居中（原来 cardW==cap 时走 else 分支会贴左边）
                     x = (width - cardW) / 2
-                    y = (height - cardH - side - navBottomPx.toInt()).coerceAtLeast(side)
+                    y = (height - cardH - side - sheetBottomPx).coerceAtLeast(side)
                 }
 
                 anchor != null -> {
@@ -374,6 +404,44 @@ internal fun DialogHost(
             layout(width, height) { placeable.place(x, y) }
         }
     }
+}
+
+/**
+ * 键盘**实际挡住**窗口多少像素。
+ *
+ * 量法：根视图高度 − 键盘顶在**窗口坐标**里的位置（visible.bottom − 根视图屏幕 y）。
+ * 三种窗口策略下都给出「还差多少要自己让」：
+ *  - adjustResize：根视图已经变矮，可见区同步缩短 → 差 ≈ 0（系统让过了，别让第二次）；
+ *  - edge-to-edge / 悬浮键盘：根视图没变、可见区被吃掉 → 差 = 键盘高度；
+ *  - adjustPan：窗口整体被上移，可见底跟着窗口走 → 差 ≈ 0（系统挪过了）。
+ *
+ * 键盘高度不是 Compose 状态，靠 ViewTreeObserver.OnGlobalLayoutListener 驱动；
+ * 值没变就不写 state，否则每次布局回调都会触发一次重组。
+ */
+@Composable
+private fun rememberKeyboardOverlapPx(): Int {
+    val view = LocalView.current
+    var overlap by remember { mutableIntStateOf(0) }
+    DisposableEffect(view) {
+        val root = view.rootView
+        val loc = IntArray(2)
+        val visible = Rect()
+        fun measure(): Int {
+            root.getLocationOnScreen(loc)
+            view.getWindowVisibleDisplayFrame(visible)
+            val visibleBottomInWindow = visible.bottom - loc[1]
+            return (root.height - visibleBottomInWindow).coerceIn(0, root.height)
+        }
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            val value = measure()
+            if (value != overlap) overlap = value
+        }
+        view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        // 首帧先量一次：从「键盘已弹起」的状态再开一个弹层时不用等下一次布局
+        listener.onGlobalLayout()
+        onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+    }
+    return overlap
 }
 
 /**
