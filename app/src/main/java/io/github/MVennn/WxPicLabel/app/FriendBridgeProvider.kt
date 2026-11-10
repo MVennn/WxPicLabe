@@ -261,7 +261,7 @@ object RecordStore {
         val rawRows: Int = 0,
         /** 顶层 events 数组里到底有几个元素。 */
         val rawEvents: Int = 0,
-        /** 顶层键名，诊断行直接摆出来。 */
+        /** 顶层键名；解析不出来时写日志（界面上早已没有诊断行，见 docs/IMAGE-RECORD.md）。 */
         val topKeys: String = "",
         /** 读到它的路径：strict / lenient / salvage / empty。 */
         val path: String = "strict",

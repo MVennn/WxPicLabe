@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,8 +22,6 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.MVennn.WxPicLabel.R
@@ -243,6 +239,7 @@ internal fun ImgLabelRecordScreen() {
     val clearTitle = stringResource(R.string.img_label_repeat_clear)
     val clearMessage = stringResource(R.string.record_clear_message)
     val searchHint = stringResource(R.string.record_search_hint)
+    val searchClearLabel = stringResource(R.string.search_clear)
     val filterTitle = stringResource(R.string.record_filter_title)
     val rangeLabels = listOf(
         stringResource(R.string.record_filter_all),
@@ -423,67 +420,18 @@ internal fun ImgLabelRecordScreen() {
             )
         }
 
-        // ---- 诊断行：拿不到记录时要立刻说清是哪一环断了（没回传 / 解析失败 / 旧版文档），
-        //      而不是只给一个空白列表。这条也是用户反馈「读不出来」时的第一手证据。
-        val err = book.error
-        val diag = when {
-            // 刷新中只在「还没有任何快照」时藏诊断；已有数据就把上一次的结构诊断留在原地，
-            // 否则每次进页那 6 秒都会退回「0 个文件名 0 条记录」的空白态，像是读不到
-            refreshing && book.at == 0L -> null
-            err != null -> stringResource(R.string.record_diag_error, err)
-            book.at == 0L -> stringResource(R.string.record_diag_waiting)
-            // 文档到了、也解析了，但顶层结构不是我们认识的形状（老模块 / 半截文档）
-            book.rows.isEmpty() && book.events.isEmpty() && (book.rawRows > 0 || book.rawEvents > 0) ->
-                stringResource(R.string.record_diag_schema, book.chars, book.topKeys, book.rawRows, book.rawEvents)
-            // 文档合法但一条记录也没有
-            book.rows.isEmpty() && book.events.isEmpty() && book.chars > 0 ->
-                stringResource(R.string.record_diag_doc_empty, book.chars, book.topKeys)
-            // 文档整体坏了，靠原文回捞救回来的
-            book.path == "salvage" -> stringResource(R.string.record_diag_salvaged, book.chars, book.rows.size, live.size)
-            !book.hasEvents && book.rows.isNotEmpty() -> stringResource(R.string.record_diag_legacy)
-            else -> stringResource(R.string.record_diag_ok, book.chars, book.rows.size, live.size)
-        }
-        if (diag != null) {
-            Text(
-                text = diag,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 32.dp, vertical = 2.dp),
-            )
-        }
-
         // ---- 搜索 + 时间范围
         SmallTitle(stringResource(R.string.record_section_filter))
         Card(modifier = Modifier.cardPadding()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-            ) {
-                BasicTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    textStyle = TextStyle(
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 15.sp,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    decorationBox = { inner ->
-                        if (query.isEmpty()) {
-                            Text(
-                                text = searchHint,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                fontSize = 15.sp,
-                            )
-                        }
-                        inner()
-                    },
-                )
-            }
+            // 卡内只给 4dp：搜索框自带 12dp 内边距，4 + 12 = 16dp，
+            // 与同卡下面那行「时间范围」的标题落在同一条竖线上（docs/UI.md §9.2）
+            AppSearchField(
+                value = query,
+                onValueChange = { query = it },
+                hint = searchHint,
+                clearLabel = searchClearLabel,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
+            )
             BasicComponent(
                 title = filterTitle,
                 modifier = Modifier.onGloballyPositioned { rangeAnchor = it.boundsInWindow() },

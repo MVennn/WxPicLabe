@@ -5,6 +5,8 @@
 材质表现见 [LIQUID-GLASS.md](LIQUID-GLASS.md)，用户可见文案见 [NAMING.md](NAMING.md)，
 Hook 与数据链路见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
+> 跨仓通用的界面设计规范（骨架与间距、九种行型的选型表、可编辑字段三形态、弹层选型与尺寸、图标几何、文案 / 空态 / 反馈口径、提交前自检）正本是 [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md)。本篇只写本仓的页面与硬规则；两处冲突以 DESIGN-SYSTEM 为准。
+
 ---
 
 ## 1. 技术底座
@@ -205,6 +207,13 @@ SettingsActivity
    （0.5dp、`start = 16.dp`，从卡内缩进处起笔像一条分叉），被明确否掉（2026-11）。
    需要把「列表」和「动作行」分开时，拆成两张 `Card(modifier = Modifier.cardPadding())`，卡与卡之间补一行
    `Spacer(Modifier.height(12.dp))` —— 这是本仓既有口径（`ImgLabelRecordScreen.kt:517`、`:587`），不补就会贴成一整块。
+10. **输入框只有两种**：页内搜索走 `AppSearchField`（§9），弹层输入走 `TextInputDialogSpec`。
+    别在页面里直接写 `BasicTextField` —— 各写各的会漏 `cursorBrush`（深色主题下光标纯黑看不见）、漏 `ImeAction.Search`，
+    内边距与字号也会各飘各的（2026-11 记录页与选择会话页就是三份分叉实现）。
+11. **需要打字才能改的值，一律「一行入口 + 弹层输入」**：行上只放当前值（或空态灰字），点行进弹层改，
+    清空这类值走二次确认。页面上不常驻输入框 —— 常驻输入框会把整页撑高（黑白名单页曾有一块 260dp 的文本框），
+    而且「框里的字」和「已保存的字」是两件事，用户以为改完就生效（2026-11 重命名页与页脚文字都按这条改的）。
+    唯一例外是搜索框：它的值不落地、不影响配置，见 §9。
 
 ---
 
@@ -217,3 +226,70 @@ SettingsActivity
 | 最近任务里还是旧图标 | `TaskDescription` 是首次创建时缓存的，不跟 mipmap 变 | `SettingsActivity.syncTaskDescription()` |
 | 换语言后界面没变 | `attachBaseContext` 里没包装 Context | §6 |
 | 二级页返回时闪白 | `SubScreen` 被裁剪 | `Screens.kt` 顶部注释 |
+
+---
+
+## 9. 输入框与搜索框
+
+全 App 的搜索框只有一处实现：`ui/AppSearchField.kt` 的 `AppSearchField`。
+**页内搜索一律调它**，不要再自己拼 `BasicTextField` + `decorationBox` —— 这个仓曾经有三份各写各的：
+一份竖向内边距 10dp、一份 12dp；一份传了 `keyboardOptions`、一份漏了；**三份都没传 `cursorBrush`**，
+而 `BasicTextField` 的默认光标是纯黑，深色主题下等于没有光标。差异不是设计选择，是抄骨架时漏参数。
+
+### 9.1 形态
+
+| 项 | 值 | 为什么 |
+| --- | --- | --- |
+| 圆角 | 12dp | 与弹层输入框同一个数，进出弹层不跳 |
+| 底色 | `surfaceContainerHighest`，0.9；聚焦时满色 1.0 | 卡已经是面，输入框只是卡上的一块凹处，不画描边 |
+| 高度 | 固定 44dp | 卡里每行等高；让它随字号浮动，切语言就串版 |
+| 壳内左内边距 | 12dp | 见 9.2 |
+| 字号 / 色 | 页内 15sp、`onSurface`；占位 `onSurfaceVariantSummary` 同字号 | 与 `BasicComponent` 摘要一致，页内不出现第三档字号 |
+| 光标 | `cursorBrush = SolidColor(primary)` | 硬约束，不是装饰；不传就是纯黑看不见 |
+| 清空 | 值非空时右端 40dp 触控区，`AppIcons.Close` 细 ✕，`onSurfaceVariantActions` | 与行尾 ✕、＋ 同一套几何（见 §4 图标表），✕ 在这里是「清掉输入」不是批毁动作，所以不用红 |
+| 键盘 | `singleLine` + `ImeAction.Search`，搜索键只收键盘 | 结果是边打边筛，不需要「再确认一次」 |
+| 行数限制 | 无 | 搜索词不该被截断；弹层的 `maxChars` 是另一套语义 |
+
+### 9.2 卡内怎么摆
+
+调用方在 `Card` 里只给 **水平 4dp**（竖向 10dp）：
+壳自带 12dp 左内边距，`4 + 12 = 16dp`，正好和同卡其它行（`BasicComponent` 内部 16dp）的标题落在同一条竖线上。
+直接传 `modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp)` 给 `AppSearchField` 的 `modifier` 参数即可 ——
+`modifier` 在背景之前应用，所以 4dp 落在壳外、12dp 落在壳内。**不要再包一层 `Column`/`Row` 只为了给这个 padding。**
+
+### 9.3 空结果三件套
+
+搜不到东西时，三件事缺一不可：
+
+1. **命中数或空态**要看得见 —— 别让页面只剩一片空白，用户会以为名单/记录被删了；
+2. **空态文案要区分「本来就没有」和「搜索筛掉了」**：`record_empty_body` 对 `record_empty_search`、
+   `scope_empty_body` 对 `scope_empty_search`。两句共用一句，用户就分不清是数据没了还是词打错了；
+3. **退出搜索的路径**：清空按钮 + 键盘搜索键 + （记录页）时间范围回到「全部」。
+
+搜索词只 `remember`，**不持久化**：下次进来是干净的全量视图，不会「一进来就少一半」。
+
+### 9.4 弹层输入框不在本节
+
+`AppDialogWidgets.kt` 里的弹层输入框有自己的壳（16sp、`maxChars`、错误红字），
+它和页内搜索是两种东西，**不要把 `AppSearchField` 塞进弹层** —— 会套两层底、字号还会打架。
+
+```kotlin
+// 页内搜索的标准写法
+AppSearchField(
+    value = query,
+    onValueChange = { query = it },
+    hint = searchHint,            // 兼作无障碍标签，写清「能搜什么」
+    clearLabel = searchClearLabel, // strings.xml 的 search_clear，全 App 共用
+    modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
+)
+```
+
+### 9.5 反面清单
+
+- 自己 `BasicTextField` + `decorationBox`（本仓已有两处前科，2026-11 清理）；
+- 省 `cursorBrush`；
+- 省 `keyboardOptions`/`keyboardActions`（键盘上会出现「换行」而不是「搜索」）；
+- 清空按钮用 `AppIcons.Add`/实心图标或红色；
+- 给清空按钮的图标塞 `Modifier.size(...)`（尺寸归图标自己，见 §4）；
+- 搜不到时一句 `Text("无")` 了事，不留退出路径；
+- 把搜索词写进配置（下次进来是筛过的状态）。

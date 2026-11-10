@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import io.github.MVennn.WxPicLabel.R
 import io.github.MVennn.WxPicLabel.app.ModulePreferences
 import io.github.MVennn.WxPicLabel.core.ConfigKeys
+import io.github.MVennn.WxPicLabel.feature.imglabel.RenameRules
 import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
@@ -71,6 +72,13 @@ internal fun ImgLabelSendScreen(
     )
     // 条数只看关键字表，与大小写开关无关；模式为「关闭」时那一行直接显示「关闭」
     val filterRuleCount = TextFilter.parseRules(filterRules, true).size
+
+    val renameRules by rememberStringPref(
+        ConfigKeys.IMG_LABEL_RENAME_RULES,
+        ConfigKeys.DEFAULT_IMG_LABEL_RENAME_RULES,
+    )
+    // 入口行按「生效的规则条数」报数：与重命名页列表同一份解析
+    val renameCount = RenameRules.parse(renameRules).size
 
 
     Column(
@@ -132,6 +140,11 @@ internal fun ImgLabelSendScreen(
         Card(modifier = Modifier.cardPadding()) {
             BasicComponent(
                 title = stringResource(R.string.rename_entry),
+                summary = if (renameCount == 0) {
+                    stringResource(R.string.rename_entry_summary_empty)
+                } else {
+                    stringResource(R.string.rename_entry_summary, renameCount)
+                },
                 endActions = { ArrowRightIcon() },
                 onClick = onOpenRename,
             )

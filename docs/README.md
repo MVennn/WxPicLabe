@@ -14,6 +14,7 @@
 | [IMG-LABEL-SEND-SETTINGS.md](IMG-LABEL-SEND-SETTINGS.md) | 发送设置：同一张图重复发送追加 +2/+3 的计数存储、开关层级与改动清单 |
 | [IMG-LABEL-CHAT-SCOPE.md](IMG-LABEL-CHAT-SCOPE.md) | 会话白名单：只对勾选的好友/群聊生效，talker 取法与好友列表抓取通道 |
 | [IMG-LABEL-TEXT-FILTER.md](IMG-LABEL-TEXT-FILTER.md) | 文字过滤：黑白名单在 `textFor` 里怎么判定、为什么必须压在重复计数之前、关键字语法与试算 |
+| [IMG-LABEL-RENAME.md](IMG-LABEL-RENAME.md) | 重命名规则：改的是发出去那行文字、分隔符优先级、页面形态与导入为什么是合并而不是替换 |
 | [ALBUM-FILENAME-BUTTON.md](ALBUM-FILENAME-BUTTON.md) | 相册「文件名」开关：原图右边的注入点、布局避坑、显隐规则与三道闸 |
 | [IMAGE-RECORD.md](IMAGE-RECORD.md) | 发送记录：逐次台账与聚合计数的双写、`/records` 字符切片回传、改名/改次数/删除的幂等动作串、记录页的搜索与按批次分组 |
 
@@ -32,6 +33,7 @@
 | 文档 | 一句话定位 |
 | --- | --- |
 | [UI.md](UI.md) | 设置界面总览：文件职责、页面结构、弹层体系、改 UI 的硬规则与已知坑 |
+| [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md) | 界面设计规范（两仓共用）：骨架与间距、九种行型的选型表、可编辑字段三形态、弹层选型与尺寸、图标几何、文案 / 空态 / 反馈口径、提交前自检 |
 | [LIQUID-GLASS.md](LIQUID-GLASS.md) | 液态玻璃材质规范：两档光效 + 纯色兜底的设计正本、降级链、逐表面参数矩阵 |
 | [NAMING.md](NAMING.md) | 文案与命名规范：开关不写「启用」、新增类写三段式、副标题只说位置 |
 

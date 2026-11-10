@@ -115,6 +115,7 @@
     <string name="action_confirm">Confirm</string>
     <string name="action_known">Got it</string>
     <string name="action_cancel">Cancel</string>
+    <string name="search_clear">Clear search</string>
     <string name="reset_done">All features disabled and defaults restored</string>
     <string name="backup_working">Exporting…</string>
     <string name="restore_working">Restoring…</string>
@@ -237,21 +238,37 @@
     <string name="img_label_section_rename">Renaming</string>
     <string name="rename_entry">Rename rules</string>
     <string name="rename_title">Rename rules</string>
-    <string name="rename_section_format">Format</string>
-    <string name="rename_format_help">One rule per line, "old -> new". Left is the file name without extension, right is the text to send; lines starting with # are comments. "=" and tab also work as separators.</string>
+    <string name="rename_entry_summary">%1$d rules</string>
+    <string name="rename_entry_summary_empty">Original file name</string>
     <string name="rename_section_rules">Rules</string>
-    <string name="rename_placeholder">MVIMG_20261104_114734 -> My photo</string>
-    <string name="rename_section_actions">Actions</string>
-    <string name="rename_save">Save rules</string>
-    <string name="rename_saved">Saved</string>
+    <string name="rename_empty">No rules yet</string>
+    <string name="rename_empty_summary">Without rules, images are sent with their original file name</string>
+    <string name="rename_new_rule">New rule</string>
+    <string name="rename_new_rule_tip">Write "old -> new".</string>
+    <string name="rename_new_rule_hint">MVIMG_20261104_114734 -> My photo</string>
+    <string name="rename_new_rule_empty">The rule is empty</string>
+    <string name="rename_new_rule_single">One rule at a time</string>
+    <string name="rename_new_rule_format">Wrong format, write "old -> new"</string>
+    <string name="rename_new_rule_exists">This name already has a rule</string>
+    <string name="rename_rule_added">Added</string>
+    <string name="rename_rule_delete">Delete this rule</string>
+    <string name="rename_rule_deleted">Deleted</string>
+    <string name="rename_clear_rules">Clear rules</string>
+    <string name="rename_clear_confirm_title">Clear rules</string>
+    <string name="rename_clear_confirm_message">Every image will be sent with its original file name.</string>
+    <string name="rename_cleared">Cleared</string>
+    <string name="rename_section_actions">Import &amp; export</string>
     <string name="rename_import">Import from file</string>
-    <string name="rename_imported">Imported</string>
+    <string name="rename_import_summary">Appended to existing rules; duplicate names are skipped</string>
+    <string name="rename_paste">Import from clipboard</string>
+    <string name="rename_paste_summary">Also appends, never replaces</string>
     <string name="rename_export">Export to file</string>
-    <string name="rename_exported">Exported</string>
     <string name="rename_copy">Copy to clipboard</string>
+    <string name="rename_imported_count">Appended %1$d rules</string>
+    <string name="rename_imported_counts">Appended %1$d rules, skipped %2$d duplicates</string>
+    <string name="rename_imported_none">Nothing new to append</string>
+    <string name="rename_exported">Exported</string>
     <string name="rename_copied">Copied</string>
-    <string name="rename_paste">Paste from clipboard</string>
-    <string name="rename_pasted">Pasted</string>
     <string name="rename_clipboard_empty">Clipboard is empty</string>
     <string name="rename_failed">Failed: %1$s</string>
     <string name="record_title">Send records</string>
@@ -266,7 +283,7 @@
     <string name="record_section_actions">Actions</string>
     <!-- Send records: search / filter / group / edit -->
     <string name="record_section_filter">Search &amp; filter</string>
-    <string name="record_search_hint">Search by file name</string>
+    <string name="record_search_hint">Search name, count or time</string>
     <string name="record_filter_title">Time range</string>
     <string name="record_filter_all">All time</string>
     <string name="record_filter_today">Today</string>
@@ -290,13 +307,6 @@
     <string name="record_edit_name_message">Only this entry changes; messages already sent stay as they are.</string>
     <string name="record_edit_name_hint">File name</string>
     <string name="record_name_empty">Name cannot be empty</string>
-    <string name="record_diag_ok">received %1$d chars · %2$d names / %3$d records</string>
-    <string name="record_diag_waiting">WeChat has not sent any records back yet: open WeChat (no need to send a photo), then tap the card above to read again</string>
-    <string name="record_diag_error">Could not parse what came back: %1$s</string>
-    <string name="record_diag_legacy">Old-format document (no per-send ledger): view-only, upgrades automatically after one WeChat restart</string>
-    <string name="record_diag_schema">%1$d chars came back but nothing parses (top-level keys %2$s; raw %3$d / %4$d items): force-stop WeChat, reopen it, and let the new module push again</string>
-    <string name="record_diag_doc_empty">%1$d chars came back with no records inside (top-level keys %2$s): send a few photos, then refresh</string>
-    <string name="record_diag_salvaged">%1$d chars came back, document incomplete: recovered %2$d names / %3$d records from the raw text</string>
     <string name="record_edit_nth_title">Change count</string>
     <string name="record_edit_nth_message">Only this entry changes; the next send of this photo continues from the highest remaining count.</string>
     <string name="record_edit_nth_hint">Count</string>
@@ -317,6 +327,7 @@
     <string name="scope_section_rooms">Groups (%1$d)</string>
     <string name="scope_section_friends">Friends (%1$d)</string>
     <string name="scope_search_hint">Search name or WeChat ID</string>
+    <string name="scope_empty_search">No matching conversation in the list. Try another keyword.</string>
 
     <!-- ============================ Keyword filter ============================ -->
 

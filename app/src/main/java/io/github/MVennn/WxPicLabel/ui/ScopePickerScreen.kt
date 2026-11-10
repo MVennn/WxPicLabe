@@ -2,14 +2,12 @@ package io.github.MVennn.WxPicLabel.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -20,7 +18,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
@@ -163,38 +160,27 @@ internal fun ScopePickerScreen() {
 
         Spacer(Modifier.height(8.dp))
         Card(modifier = Modifier.cardPadding()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                BasicTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    textStyle = TextStyle(
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 15.sp,
-                    ),
-                    modifier = Modifier.weight(1f),
-                    decorationBox = { inner ->
-                        if (query.isEmpty()) {
-                            Text(
-                                text = stringResource(R.string.scope_search_hint),
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                fontSize = 15.sp,
-                            )
-                        }
-                        inner()
-                    },
-                )
-            }
+            // 卡内只给 4dp：搜索框自带 12dp 内边距，4 + 12 = 16dp（docs/UI.md §9.2）
+            AppSearchField(
+                value = query,
+                onValueChange = { query = it },
+                hint = stringResource(R.string.scope_search_hint),
+                clearLabel = stringResource(R.string.search_clear),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
+            )
         }
 
         if (book.entries.isEmpty()) {
             SmallTitle(stringResource(R.string.scope_section_empty))
             Card(modifier = Modifier.cardPadding()) {
                 CardNote(stringResource(R.string.scope_empty_body))
+            }
+        } else if (filtered.isEmpty()) {
+            // 名单本身有内容、只是被搜索筛空了 —— 说明「是搜不到」而不是「没有会话」，
+            // 否则用户会以为名单被清掉了（docs/UI.md §9 空结果三件套）
+            Spacer(Modifier.height(8.dp))
+            Card(modifier = Modifier.cardPadding()) {
+                CardNote(stringResource(R.string.scope_empty_search))
             }
         }
 

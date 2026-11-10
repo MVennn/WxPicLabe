@@ -205,7 +205,8 @@ SmallTitle「记录」
 - 解析在微信进程侧做（`feature/imglabel/RenameRules.java`），每批一次、失败发原名。
 - 配置键 `img_label_rename_rules`（String，整表一个字符串）—— 一行一条就是文件的全部内容，
   比多行的 StringSet 好导入导出。
-- 页面：多行文本框 + 保存 / 从文件导入 / 导出到文件 / 复制 / 粘贴。
+- 页面（2026-11 重做）：规则逐条成行 + 新建规则走弹层 + 清空走二次确认，导入就地合并；
+  形态、校验与导入语义的正本在 [IMG-LABEL-RENAME.md](IMG-LABEL-RENAME.md)，本节只留配置侧事实。
   导入导出走 SAF（`OpenDocument` / `CreateDocument`），导出文件名默认 `wxpiclabel-rename.txt`。
 
 ### 发送记录（`ui/ImgLabelRecordScreen.kt`）
