@@ -31,6 +31,9 @@ if not exist "%GRADLE_USER_HOME%" mkdir "%GRADLE_USER_HOME%"
 if not defined ANDROID_SDK_ROOT (
     if defined ANDROID_HOME if exist "%ANDROID_HOME%" set "ANDROID_SDK_ROOT=%ANDROID_HOME%"
 )
+REM  caller may export a stale path: drop it so Gradle falls back to sdk.dir
+if defined ANDROID_SDK_ROOT if not exist "%ANDROID_SDK_ROOT%" echo [build] ANDROID_SDK_ROOT=%ANDROID_SDK_ROOT% does not exist, ignored.
+if defined ANDROID_SDK_ROOT if not exist "%ANDROID_SDK_ROOT%" set "ANDROID_SDK_ROOT="
 if not defined ANDROID_SDK_ROOT (
     if exist "%ROOT%\.work\android-sdk" set "ANDROID_SDK_ROOT=%ROOT%\.work\android-sdk"
 )

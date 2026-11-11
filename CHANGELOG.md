@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- 修复 `build.cmd` 把调用方环境里已失效的 `ANDROID_SDK_ROOT` 当成 SDK 用（本机该变量指向安装器留下的空目录，日志一直打印假路径，只靠 `local.properties` 兜底才编得过）；现在目录不存在就打印一行说明并丢弃，回落到 `sdk.dir`
 - 构建 CI 的 build job 换掉 `android-actions/setup-android@v3`：它默认安装的 `tools` 包已从 SDK 仓库下架，job 会死在 setup 阶段；现在直接调 runner 预置的 `sdkmanager` 安装 `platforms;android-37.0` 与 `build-tools;35.0.0`、`36.0.0`（`docs/BUILD.md`）
 
 ## [0.8.0] - 2026-11-11

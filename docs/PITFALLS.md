@@ -150,3 +150,15 @@
 - **现象**：`build.cmd release` 已打印 `BUILD SUCCESSFUL`，立刻 `Get-FileHash` 算 sha256 记进 `PROGRESS.md` 与 Release 正文，上传后 GitHub 资产 digest 与记录不一致，**体积却一模一样**（1,419,160 B）。
 - **根因**：Gradle 打印 `BUILD SUCCESSFUL` 之后还有 daemon 收尾与 APK 的最终落盘（AGP 先写未对齐未签名的包到同一路径，再对齐、再签名）；这时读文件拿到的是中间态。体积相同、字节不同，肉眼完全看不出来。
 - **怎么避**：算 sha256 前先确认构建任务**已经退出**（后台 job 状态 `completed`），并且 `LastWriteTime` 已经稳定；上传后用 `gh release view <tag> --json assets` 的 `digest` 与本地 `Get-FileHash` 对齐，**以 GitHub 侧为准**回写记录。本仓 0.8.0 就是首轮记录成 `bc19c2…`、实际上传 `fe02a4…`，事后按 digest 改正的。
+
+## 27. build.cmd 把调用方那条失效的 SDK 路径当成真 SDK
+
+- **现象**：`build.cmd` 打印 `[build] SDK=C:\Users\<user>\AppData\Local\Android\Sdk`，而该目录 `Test-Path` 是 False；本机因 `local.properties` 的 `sdk.dir` 兜底还能编，换台机器或删掉 `local.properties` 就报找不到 SDK。
+- **根因**：脚本只判「`ANDROID_SDK_ROOT` 有没有定义」，没判目录是否存在（文件头注释写了 must exist，代码没落实）；环境变量指向安装器卸载后留下的空路径时，错误路径会被原样传给 Gradle。
+- **怎么避**：脚本在采用前先校验存在性，不存在就 echo 一行说明并清空变量，让它回落到 `.work\android-sdk` 或 `local.properties`。现在日志会打 `ANDROID_SDK_ROOT=... does not exist, ignored.` 与 `SDK=sdk.dir from local.properties`。
+
+## 28. CI 的 build job 死在 setup-android
+
+- **现象**：CI 的 build job 31 秒就失败，挂在步骤 `Run android-actions/setup-android@v3`，其下「安装 SDK 组件」「构建」「上传 APK」全部 skipped；日志末尾 `Warning: Failed to find package 'tools'` → `Error: The process '/usr/local/lib/android/sdk/cmdline-tools/16.0/bin/sdkmanager' failed with exit code 1`。
+- **根因**：该 action 默认安装 `tools platform-tools`，而 `tools` 包已从 SDK 仓库下架。另有第二个坑：平台包真名带小版本号 —— 仓库里是 `platforms;android-37.0`，写成 `platforms;android-37` 同样 `Failed to find package`（`sdkmanager --list --channel=3` 可直接核对）。
+- **怎么避**：不用该 action，直接调 runner 预置的 `cmdline-tools/*/bin/sdkmanager` 装 `platforms;android-37.0` 与 `build-tools;35.0.0`、`36.0.0`；同时把 `ANDROID_SDK_ROOT` / `ANDROID_HOME` 显式指到 `/usr/local/lib/android/sdk`（CI 上没有 `local.properties`）。`.github/workflows/ci.yml` 现在就是这套，见 `docs/BUILD.md`。
