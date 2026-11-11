@@ -77,7 +77,8 @@ libxposed 服务通道、`ConfigKeys`）。**新增运行期反射入口时必�
 | 3 | `local.properties` 的 `sdk.dir` | 前三者都没有时由 Gradle 自己读 |
 
 - `local.properties` 不进库；模板见 `local.properties.example`（值写成 `<REPLACE-ANDROID-SDK-DIR>`）。
-- 仓内 SDK 需要 `platforms;android-37` 与 `build-tools;36.0.0`（`compileSdk = 37`）。
+- 仓内 SDK 需要 `platforms;android-37.0` 与 `build-tools;35.0.0`（`compileSdk = 37`）。
+- **平台包名带小版本号**：仓库里是 `platforms;android-37.0`，写成 `platforms;android-37` 会 `Failed to find package`。
 
 ## 依赖 Gradle 发行版
 

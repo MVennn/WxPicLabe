@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- 构建 CI 的 build job 换掉 `android-actions/setup-android@v3`：它默认安装的 `tools` 包已从 SDK 仓库下架，job 会死在 setup 阶段；现在直接调 runner 预置的 `sdkmanager` 安装 `platforms;android-37.0` 与 `build-tools;35.0.0`、`36.0.0`（`docs/BUILD.md`）
+
 ## [0.8.0] - 2026-11-11
 
 - 调整 新建时段改成上下滑动的滚轮（iOS 闹钟那种），不再手打 `15:30-17:30`：弹层里四根 `NumberPicker`（开始 时/分、结束 时/分），上下滑即可，循环滚动，24 点用 `24:00` 表示；初始值取当前整点起两小时；手打要切输入法、还要教用户分隔符与格式，滚轮给不出非法输入，所以校验只剩「起止相同」「与已有段重叠」两条。新增 `TimeRangeDialogSpec`，与 `TextInputDialogSpec` 同壳（`docs/DESIGN-SYSTEM.md` §4.1、§5.1，`docs/UI.md` §8）
