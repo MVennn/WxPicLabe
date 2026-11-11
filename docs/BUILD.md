@@ -16,8 +16,8 @@
 
 ```cmd
 cd /d "%~dp0"
-build.cmd            :: debug，日常编译用，**别装到实机上测流畅度**
-build.cmd release    :: release，开了 R8，实机要装这一个
+build.cmd            :: release（默认），开了 R8，实机与日常测试都装这一个
+build.cmd debug      :: debug，只在要 debuggable 抓日志时用，实机上掉帧明显
 ```
 
 产物：
@@ -29,7 +29,7 @@ build.cmd release    :: release，开了 R8，实机要装这一个
 
 需要分发时另存副本（`dist/` 已被 gitignore，仓库不存 APK）。
 
-第一个词是变体名（`debug` / `release`，不写默认 `debug`），其余参数原样转给 Gradle；
+第一个词是变体名（`debug` / `release`，不写默认 `release`），其余参数原样转给 Gradle；
 不接受 `clean` 之类的额外参数（Gradle 按参数顺序执行，容易把产物清掉）；
 要全量重建就删掉 `app\build` 再跑 `build.cmd`。
 

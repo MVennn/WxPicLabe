@@ -2,6 +2,26 @@
 
 > **一句话**：本仓任务与验收记录，按批次追加。
 
+## 2026-11-11 · 0.8.0 追加次数设置：时段闸门 + 滚轮选时间（已发版）
+
+**需求（用户）**：` +N` 只累计在设定时段内发出的图 —— 时段外发的连号都不占，「今天三点半前发过、三点半后再发」也不能变 +2；时段选择要 iOS 闹钟那种上下滑动的滚轮，不要打字。
+
+**改动**
+- `feature/imglabel/RepeatWindow.java`（新）：多段 `15:30-17:30` 解析、跨零点、满串宽容（全角分隔符）、`Span.of` 按分钟直接造段；空串 = 全天
+- 计数闸在 `draftFor`：时段外不调 `bump`，计数表不动；序号算在文字生成那一刻，随文字进兜底队列
+- `RepeatCounter.record`：`n = 0` 落成「明确未累计」，不再回查计数表补次数；`rebuildCounters` 取 max 不丢数
+- 发送记录：未累计条目显示「未累计 · 时间」，仍可查看与编辑
+- UI：发送设置「重复图片」卡加入口 → 三级页 `ImgLabelRepeatWindowScreen`；新建时段走新 spec `TimeRangeDialogSpec`（四根 `NumberPicker`，`wrapAround`，值存在弹层那层）
+- 文案 30 条 ×2 语言；文档 `IMG-LABEL-SEND-SETTINGS` §12、`DESIGN-SYSTEM` §4.1/§5.1、`UI` §8、`PITFALLS` §23-§25
+
+**验证**
+- `build.cmd release` → BUILD SUCCESSFUL in 1m 12s；APK 1,419,160 B（debug 11.03 MB）；单 dex，`META-INF/xposed/*` 三件齐，keep 生效（mapping 里 `ImgLabelRepeatWindowScreenKt` / `TimeRangeDialogSpec` 均在）
+- `:app:testDebugUnitTest` 43 项全过：ConfigKeysTest 6 / RenameRulesTest 14 / RepeatWindowTest 11 / TextFilterTest 12
+- `python tools/check-docs.py` exit 0（20 篇，无断链无孤儿）
+- APK sha256 `bc19c21254d322c01c34553cb6150c91822103c5cb62e2f23d9b92ad55dcc77e`
+
+**发版**：versionCode 10 / versionName 0.8.0，tag `10-0.8.0`；`build.cmd` 默认变体改为 release（debug 包实机掉帧，仍可 `build.cmd debug` 显式出）
+
 ## 2026-11-06 · 命名规范收敛 + 发版口径对齐（完成）
 
 **用户报**：功能主标题与副标题没按 GSAuxiliary 的规范；Release 标题多带了中文描述。

@@ -50,16 +50,18 @@ if defined ANDROID_SDK_ROOT (
     echo [build] SDK=sdk.dir from local.properties
 )
 REM ---------------------------------------------------------------------------
-REM  Target variant:  build.cmd          -> debug (default, fast, LAGGY on real devices)
-REM                  build.cmd release  -> release (R8 on; this is the one to install)
+REM  Target variant:  build.cmd          -> release (default, R8 on; the one to install)
+REM                  build.cmd debug    -> debug (faster to build, LAGGY on real devices)
 REM  Everything after the variant word is forwarded to Gradle.
 REM ---------------------------------------------------------------------------
 REM  %* 不受 shift 影响，所以这里手动把变体词摘掉、其余参数逐个收集
-set "VARIANT=debug"
+REM  Default is release on purpose: debug builds drop frames on real devices, so a
+REM  debug APK is never a useful thing to hand over for testing.
+set "VARIANT=release"
 if /I "%~1"=="release" (
-    set "VARIANT=release"
     shift
 ) else if /I "%~1"=="debug" (
+    set "VARIANT=debug"
     shift
 )
 
