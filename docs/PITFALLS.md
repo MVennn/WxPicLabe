@@ -126,3 +126,21 @@
 - **现象**：改的是 KDoc / 行注释，assembleRelease 产物体积几乎不动，但 GitHub Release 已发布 apk 的 sha256 对不上，用户侧校验失败。
 - **根因**：classes.dex 保留源码行号映射（debug info），注释增删会改变行号表，dex 字节随之变化；「同长度改动未必不变」。
 - **怎么避**：注释 / KDoc 级改动也按功能改动对待：跑完 assembleRelease 必须重新 gh release upload --clobber 并回写发布说明里的 sha256，不要把「只改注释」当成免验证改动。
+## 23. 发送记录里冒出一行「第 0 次」
+
+- **现象**：开了「追加次数设置」后，时段外发出的那几张图在发送记录里显示成 `第 0 次`，或者整行消失。
+- **根因**：`RepeatCounter.record` 原来在 `n ≤ 0` 时会**回查计数表**来补次数；「追加次数设置」必须用 `n = 0` 表达「发出时不在时段内、不占号」，沿用回查就会把历史计数顶成这次的实际编号。
+- **怎么避**：`record(label, n, batch, atMs)` 现在把 `n` 当明确值落盘（`Math.max(0, n)`），`0` 就是「未累计」。记录页渲染按 `ev.n <= 0` 单独出「未累计 · 时间」文案 —— 不能显示成第 0 次，也不能隐藏（隐藏等于丢发送台账）；`rebuildCounters` 天然跳过 `n <= 0`，删记录 / 改次数不会凭空造出计数。
+- **顺带**：`RepeatWindow.plus` 早期用 `List.contains(span)` 去重，`Span` 没重写 `equals` 就恒为 false，同一段能加两次；改成按起止比较。给自定义类做去重前先确认它有没有 `equals`。
+
+## 24. 新加的三级页返回后掉回首页
+
+- **现象**：从发送设置进新加的三级页，点返回，回到的不是发送设置而是首页，或者配置页重进后落在别的子页。
+- **根因**：`ui/Routing.kt` 里加一个 `Route` 要同步四处，但只有 `RouteSaver` 的 `when` 是穷尽的才编译报错；`editParent` 和三级页 `when` 都带 `else`，漏了不报错，只是静默走默认分支。`RouteSaver.restore` 漏一支，进程被回收后重建就会落回 `Home`。
+- **怎么避**：新三级页按五处清单改：`Route` 定义、`editParent` 列表、`RouteSaver.save`、`RouteSaver.restore`、三级页 `when` 的 `SubScreen` 分支（外加二级页传入的 `onOpen*` 回调）。改完全局搜一遍新路由名，确认出现次数与预期一致。
+
+## 25. 新弹层缩在左上角，滚轮一划就跳回原刻度
+
+- **现象**：新做的贴底弹层（时段滚轮）弹出来缩在屏幕左上角、只有内容那么宽；或者滚轮能滑，一松手又跳回打开时的刻度。
+- **根因**：①`ui/AppDialogHost.kt` 的 `sheet` 判定是**手写的类型白名单**（`spec is ConfirmDialogSpec || spec is TextInputDialogSpec || ...`），新 spec 不登记就走锚定分支，看起来像「锚点算错了」。②滚轮的当前值如果存在 `TimeWheel` 内部，每次重组都会用外部传入的初始值重建，滑不到别的位置。
+- **怎么避**：新 spec 一定同步改 `AppDialogHost.kt` 的 `sheet` 判定（贴底类才写进去，锚定菜单不是）。滚轮的 `value` 由弹层那一层持有（`remember(spec) { mutableIntStateOf(...) }`），`TimeWheel` 只做无状态渲染 + 回调；`remember` 的 key 必须带 `spec`，否则同一个 controller 连开两次会沿用上次的刻度。`NumberPicker` 的 `wrapAround = true` 才和 iOS 闹钟一致（23 点再往下是 0 点）。

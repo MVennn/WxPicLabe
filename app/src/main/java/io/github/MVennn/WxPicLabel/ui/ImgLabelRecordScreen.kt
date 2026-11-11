@@ -505,14 +505,24 @@ internal fun ImgLabelRecordScreen() {
                                     modifier = Modifier.onGloballyPositioned {
                                         rowAnchor.value = it.boundsInWindow()
                                     },
-                                    summary = if (ev.editable) {
-                                        stringResource(
+                                    // n <= 0 = 这张图发出时不在追加时段内，根本没进计数表。
+                                    // 不能显示成「第 0 次」（会被读成 bug），也不能藏起来 ——
+                                    // 它仍然是一条真实发送记录，只是没参与累计。
+                                    summary = when {
+                                        ev.n <= 0 && ev.editable -> stringResource(
+                                            R.string.record_row_uncounted,
+                                            hmsFmt.format(Date(ev.at)),
+                                        )
+                                        ev.n <= 0 -> stringResource(
+                                            R.string.record_row_uncounted_readonly,
+                                            hmsFmt.format(Date(ev.at)),
+                                        )
+                                        ev.editable -> stringResource(
                                             R.string.record_row_summary,
                                             ev.n,
                                             hmsFmt.format(Date(ev.at)),
                                         )
-                                    } else {
-                                        stringResource(
+                                        else -> stringResource(
                                             R.string.record_row_readonly,
                                             ev.n,
                                             hmsFmt.format(Date(ev.at)),

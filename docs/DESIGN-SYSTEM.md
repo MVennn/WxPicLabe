@@ -239,25 +239,28 @@ BasicComponent(
 | 立即执行 | `BasicComponent` | 无 | 可选 | 执行 + Toast |
 | 选一个值 | `BasicComponent` | `↓` | 当前值 | `ChoiceDialogSpec` |
 | 填短值 | `BasicComponent` + 弹层 | `›` | 当前值 | `TextInputDialogSpec` |
+| 选时段 | `BasicComponent` + 弹层 | `＋` | 已有段数 | `TimeRangeDialogSpec` |
 | 列表条目 | `BasicComponent` | `✕` | 说明（可空） | 无 / 进详情 |
 | 新建 | `BasicComponent`（primary） | `＋` | 可选 | `TextInputDialogSpec` |
 | 说明 / 结果 | `CardNote` | 无 | — | 无 |
 
 ---
 
-## 4. 可编辑字段：只有三种形态
+## 4. 可编辑字段：只有四种形态
 
-### 4.1 三形态
+### 4.1 四形态
 
 | 形态 | 用于 | 组件 | 落配置时机 |
 |---|---|---|---|
 | **行内选择器** | 离散取值（模式 / 主题 / 分隔符 / 等级） | `BasicComponent` + `ChoiceDialogSpec` | 收起动画之后 |
 | **一行入口 + 弹层输入** | 需要打字的任何值（单个文字、多行规则表的一次新增、数字） | `BasicComponent` + `TextInputDialogSpec` | 收起动画之后 |
+| **一行入口 + 滚轮** | 时间 / 时段这类**有刻度**的值（追加次数时段） | `BasicComponent` + `TimeRangeDialogSpec` | 收起动画之后 |
 | **页内搜索** | 在已有列表里筛（不落配置） | `AppSearchField` | 只 `remember`，不持久化 |
 
 **硬约束**：
 - 页面上**不常驻** `TextField`（唯一例外是搜索框）。常驻输入框会把页面撑高，且「框里的字」与「已保存的字」是两回事。
 - 需要打字的值**一律**「一行入口 + 弹层」，清空走二次确认。
+- 时间 / 时段这类有刻度的值**不让打字**：用上下滑动的滚轮（`TimeRangeDialogSpec`）。手打 `15:30-17:30` 要切输入法、还要教用户分隔符与格式，滚轮给不出非法输入。
 - 页内搜索**只** `remember`，下次进来是干净的全量视图。
 
 ### 4.2 页内搜索框 AppSearchField（唯一实现）
@@ -322,6 +325,7 @@ BasicComponent(
 | 从几个固定值里选一个 | `ChoiceDialogSpec` | **必须**传 `anchor`（贴着触发行展开） | 取消 + 确定；当前项打勾；纯动作菜单写 `selectedIndex = -1` |
 | 确认一件有后果的事 | `ConfirmDialogSpec` | **恒为 `null`**（贴底） | 取消 + 确定；`cancelText` 传空串则只画一颗 |
 | 输入文字 / 数字 | `TextInputDialogSpec` | 贴底 | 取消 + 确定 |
+| 选一个时段（时:分 → 时:分） | `TimeRangeDialogSpec` | 贴底 | 取消 + 确定；四根 `NumberPicker`（开始 时/分、结束 时/分），起止相同 / 与已有段重叠时不关窗 |
 | 看一张图 | `ImageDialogSpec` | 恒 `null` | 关闭 |
 | 必须读的协议 | `AgreementDialogSpec` | 恒 `null` | 不可关闭，返回键**只吞不放行** |
 
@@ -684,7 +688,7 @@ spec.onSelect(index); controller.dismiss()     // 错：动画期间落配置，
 | 二级 | 免责声明 / 第三方组件 | `DisclaimerScreen.kt` / `NoticeScreen.kt` |
 
 **WX 专有形态**：
-- 发送设置页六区：发送范围（开关 + 名单入口）／发送提示（两开关）／重复图片（开关）／重命名（入口 + 「N 条规则」）／文字过滤（入口 + 「黑名单 · N 条关键字」）／记录（入口）。
+- 发送设置页六区：发送范围（开关 + 名单入口）／发送提示（两开关）／重复图片（开关 + 「追加次数设置」入口）／重命名（入口 + 「N 条规则」）／文字过滤（入口 + 「黑名单 · N 条关键字」）／记录（入口）。
 - 黑白名单页三节：名单（开关行，二选一不做下拉）／匹配方式（两开关）／关键字（两张卡：列表卡 + 动作卡，间隔 12dp）；即改即生效、无保存按钮。
 - 重命名规则页三节：规则（逐条 原名 → 新名，行尾 ✕）／新建与清空（两张卡）／导入与导出；新建的四类非法输入全部挡在弹层里。
 - 发送记录页五段：概览卡／筛选节（`SmallTitle` + 裸搜索框 + 时间范围卡，搜索与条件不同框）／只读提示卡／按时间段分组／操作卡；筛选态下**全部命中组自动展开**。

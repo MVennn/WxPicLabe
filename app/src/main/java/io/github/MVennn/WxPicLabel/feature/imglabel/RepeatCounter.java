@@ -205,7 +205,7 @@ public final class RepeatCounter {
      * 的硬证据剥掉 —— 不是正则截字段，名字里真带「 +2」的不会被误伤。
      *
      * @param label 实际发出去的文字（可能带「 +N」后缀）
-     * @param n     这是第几次；≤0 表示按计数表当前值取
+     * @param n     这次是第几次；**0 = 没进累计**（时段外发出的、或重复功能关着），原样落盘
      * @param batch 批次 id；空则按时间戳临时造一个
      * @param atMs  发送成功的毫秒时间戳
      */
@@ -216,12 +216,14 @@ public final class RepeatCounter {
         try {
             ensureMigrated();
             String base = baseLabel(label);
-            int want = n > 0 ? n : parseCount(strOf(PREFIX + base, null));
+            // 0 是**明确的值**，不是「去查一下」：时段外发出的图压根没进计数表，
+            // 回查只会拿到上一条历史（甚至昨天的 +3），记录页就会把没加号的这次标成第 3 次。
+            int want = Math.max(0, n);
             long seq = longOf(KEY_SEQ, 0L) + 1L;
             String b = batch == null || batch.isEmpty() ? "b" + atMs : batch;
             prefs.edit()
                     .putLong(KEY_SEQ, seq)
-                    .putString(EVENT + seq, atMs + "|" + Math.max(1, want) + "|" + b + "|" + base)
+                    .putString(EVENT + seq, atMs + "|" + want + "|" + b + "|" + base)
                     .commit();
             trimEventsIfNeeded();
             return seq;

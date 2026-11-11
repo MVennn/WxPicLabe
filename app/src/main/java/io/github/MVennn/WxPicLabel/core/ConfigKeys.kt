@@ -58,6 +58,18 @@ object ConfigKeys {
     const val IMG_LABEL_REPEAT_RESET = "img_label_repeat_reset"
 
     /**
+     * 「追加次数」的时间闸门：只有**落在这些时段里发出去**的图才进重复计数。
+     *
+     * 取值是纯文本的时段表，一段写成 `15:30-17:30`，多段用逗号分隔；
+     * **空串 = 全天追加**（出厂口径，等于没有这道闸门）。
+     *
+     * 时段外发出的图连计数表都不碰 —— 不是「计了但不加号」。否则今天三点半前
+     * 发过的那次会把时段内第一次顶成第 2 次而 +2。解析与判定见
+     * [io.github.MVennn.WxPicLabel.feature.imglabel.RepeatWindow]。
+     */
+    const val IMG_LABEL_REPEAT_WINDOW = "img_label_repeat_window"
+
+    /**
      * 「发送范围」：是否**只**对勾选的好友 / 群聊生效。
      *
      * 关 = 所有会话都带文件名（默认，装上就能用）；开 = 只对 [IMG_LABEL_SCOPE_IDS]
@@ -271,6 +283,9 @@ object ConfigKeys {
 
     const val DEFAULT_IMG_LABEL_REPEAT_RESET = ""
 
+    /** 默认全天追加：开了重复次数就跟老版本一样，用户想收紧再去设时段 */
+    const val DEFAULT_IMG_LABEL_REPEAT_WINDOW = ""
+
     const val DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED = false
 
     const val DEFAULT_IMG_LABEL_PROGRESS_TOAST = true
@@ -331,7 +346,7 @@ object ConfigKeys {
      * 它走 [io.github.MVennn.WxPicLabel.app.ModulePreferences.getLocalBoolean] 的本地文件。
      */
     val ALL_KEYS = arrayOf(
-        ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
+        ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET, IMG_LABEL_REPEAT_WINDOW,
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES,
@@ -358,7 +373,7 @@ object ConfigKeys {
      * true，而不是被当成开关关掉。
      */
     val FEATURE_PARAM_KEYS = arrayOf(
-        IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
+        IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET, IMG_LABEL_REPEAT_WINDOW,
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES,
@@ -383,7 +398,7 @@ object ConfigKeys {
      * 否则将来接入变更监听后**收不到**它的变更。
      */
     val SNAPSHOT_KEYS: Set<String> = setOf(
-        ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET,
+        ENABLED, IMG_LABEL, IMG_LABEL_REPEAT_COUNT, IMG_LABEL_REPEAT_RESET, IMG_LABEL_REPEAT_WINDOW,
         IMG_LABEL_SCOPE_ONLY_SELECTED, IMG_LABEL_SCOPE_IDS, IMG_LABEL_SCOPE_REFRESH,
         IMG_LABEL_PROGRESS_TOAST, IMG_LABEL_KEEP_SCREEN_ON,
         IMG_LABEL_RENAME_RULES, IMG_LABEL_RECORD_DUMP,
@@ -404,6 +419,7 @@ object ConfigKeys {
         IMG_LABEL to DEFAULT_IMG_LABEL,
         IMG_LABEL_REPEAT_COUNT to DEFAULT_IMG_LABEL_REPEAT_COUNT,
         IMG_LABEL_REPEAT_RESET to DEFAULT_IMG_LABEL_REPEAT_RESET,
+        IMG_LABEL_REPEAT_WINDOW to DEFAULT_IMG_LABEL_REPEAT_WINDOW,
         IMG_LABEL_SCOPE_ONLY_SELECTED to DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED,
         IMG_LABEL_SCOPE_IDS to emptySet<String>(),
         IMG_LABEL_SCOPE_REFRESH to "",

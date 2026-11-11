@@ -108,6 +108,36 @@ internal class TextInputDialogSpec(
 ) : DialogSpec
 
 /**
+ * 时段选择弹窗：上下滑动滚轮直接选「开始 / 结束」，不用手打 `15:30-17:30`。
+ *
+ * 形态与 [TextInputDialogSpec] 一样是贴底 sheet（同样不给锚定），区别全在内容：
+ * 四根 Miuix [top.yukonga.miuix.kmp.basic.NumberPicker] 滚轮（开始 时/分、结束 时/分）。
+ * 确认时交回来的是两个**分钟数**，设置页拿它直接造 [io.github.MVennn.WxPicLabel.feature.imglabel.RepeatWindow.Span]，
+ * 不必再拼字符串让解析器读一遍 —— 滚轮不会产生「格式不对」的输入，只剩「起止相同」「与已有段重叠」两种情况要拦。
+ *
+ * 校验依然在**弹层内**做：返回非空字符串时不关闭，把那句话显示在滚轮下方。
+ */
+internal class TimeRangeDialogSpec(
+    val title: String,
+    /** 说明文字；空串时整行不出现 */
+    val message: String,
+    /** 初始起点：当天分钟数 0..1439 */
+    val startMinute: Int,
+    /** 初始终点：当天分钟数 0..1439；`0` 表示到次日零点 */
+    val endMinute: Int,
+    /** 左组上方的小标签（「开始」） */
+    val startLabel: String,
+    /** 右组上方的小标签（「结束」） */
+    val endLabel: String,
+    val confirmText: String,
+    val cancelText: String,
+    /** 返回非空字符串 = 拦下，并把这句显示在滚轮下方 */
+    val validate: (Int, Int) -> String?,
+    val onConfirm: (Int, Int) -> Unit,
+    override val anchor: Rect? = null,
+) : DialogSpec
+
+/**
  * 图片预览弹窗：贴屏幕底部、从下往上滑入（与「重置模块」确认弹窗同一个壳）。
  *
  * 弹层材质跟随 App 主题 / 液态玻璃设置；**不再按图片深浅给整窗铺底色** ——
@@ -203,6 +233,13 @@ internal class DialogController {
 
     /** 弹出文本输入（贴底、从下往上滑入） */
     fun showTextInput(s: TextInputDialogSpec) {
+        afterDismiss = null
+        closing = false
+        spec = s
+    }
+
+    /** 弹出时段选择（贴底、从下往上滑入） */
+    fun showTimeRange(s: TimeRangeDialogSpec) {
         afterDismiss = null
         closing = false
         spec = s

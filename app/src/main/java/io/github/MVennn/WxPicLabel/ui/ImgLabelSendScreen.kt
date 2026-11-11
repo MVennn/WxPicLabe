@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -15,6 +16,7 @@ import io.github.MVennn.WxPicLabel.R
 import io.github.MVennn.WxPicLabel.app.ModulePreferences
 import io.github.MVennn.WxPicLabel.core.ConfigKeys
 import io.github.MVennn.WxPicLabel.feature.imglabel.RenameRules
+import io.github.MVennn.WxPicLabel.feature.imglabel.RepeatWindow
 import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
@@ -28,7 +30,7 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
  *  - 「发送范围」：是否只对勾选的会话生效 + 名单入口
  *  - 「发送提示」：进度 Toast 与发送期间屏幕常亮
  *  - 「重复图片」：同名图片再次发送时，在文字后追加 ` +2`、` +3`……
- *  - 「重命名」「记录」：两个三级页入口（规则编辑 / 记录查看与清空）
+ *  - 「重命名」「记录」「追加次数设置」：三个三级页入口（规则编辑 / 记录查看与清空 / 时段编辑）
  *
  * 记录列表与「清空」都在三级页 `ImgLabelRecordScreen` 里 —— 计数存在微信进程
  * 自己的 SharedPreferences，模块 App 读不到，列表靠 `/records` 回传通道拿。
@@ -39,6 +41,7 @@ internal fun ImgLabelSendScreen(
     onOpenRecord: () -> Unit = {},
     onOpenRename: () -> Unit = {},
     onOpenFilter: () -> Unit = {},
+    onOpenRepeatWindow: () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
 
@@ -52,6 +55,12 @@ internal fun ImgLabelSendScreen(
         ConfigKeys.IMG_LABEL_REPEAT_COUNT,
         ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_COUNT,
     )
+    val repeatWindowRaw by rememberStringPref(
+        ConfigKeys.IMG_LABEL_REPEAT_WINDOW,
+        ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_WINDOW,
+    )
+    // 入口行按微信进程侧同一份解析报时段，避免「显示的和生效的不一致」
+    val repeatWindow = remember(repeatWindowRaw) { RepeatWindow.parse(repeatWindowRaw) }
 
     val hudToast by rememberBoolPref(
         ConfigKeys.IMG_LABEL_PROGRESS_TOAST,
@@ -133,6 +142,19 @@ internal fun ImgLabelSendScreen(
                     ModulePreferences.edit { putBoolean(ConfigKeys.IMG_LABEL_REPEAT_COUNT, v) }
                 },
                 title = stringResource(R.string.img_label_repeat_switch),
+            )
+            BasicComponent(
+                title = stringResource(R.string.repeat_window_entry),
+                summary = if (repeatWindow.isAllDay) {
+                    stringResource(R.string.repeat_window_entry_all_day)
+                } else {
+                    stringResource(
+                        R.string.repeat_window_entry_summary,
+                        repeatWindow.spans().joinToString("、") { it.text() },
+                    )
+                },
+                endActions = { ArrowRightIcon() },
+                onClick = onOpenRepeatWindow,
             )
         }
 

@@ -46,11 +46,12 @@ Hook 与数据链路见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 | 文件 | 职责 | 层级 |
 | --- | --- | --- |
-| `ImgLabelSendScreen.kt` | 发送设置：重复图片追加次数、清空发送记录、各三级页入口 | 二级 |
+| `ImgLabelSendScreen.kt` | 发送设置：重复图片追加次数（含「追加次数设置」入口）、清空发送记录、各三级页入口 | 二级 |
 | `ScopePickerScreen.kt` | 会话白名单勾选 | 三级 |
 | `ImgLabelRenameScreen.kt` | 重命名规则编辑 | 三级 |
 | `ImgLabelRecordScreen.kt` | 发送记录（同名图片计数表） | 三级 |
 | `ImgLabelFilterScreen.kt` | 文字过滤（黑白名单）：开关定名单，关键字逐条增删 | 三级 |
+| `ImgLabelRepeatWindowScreen.kt` | 重复图片的追加次数设置：时段逐条增删，删空即全天 | 三级 |
 | `MarkdownText.kt` | 免责声明 / 开源声明的 Markdown 渲染 | 二级 |
 
 **视觉与基础件**
@@ -118,7 +119,7 @@ SettingsActivity
 > 3.1.0 曾试过换成 Miuix `OverlayBottomSheet`（配 activity-compose 1.12.4 修掉
 > ViewTree Owner 缺失的崩溃），因观感与动画手感不合回退为自绘；activity 升级保留。
 
-五种弹层规格。**选型看形态，不看「能不能跑」** —— 同一个 `ChoiceDialogSpec` 传不传 `anchor`，
+六种弹层规格。**选型看形态，不看「能不能跑」** —— 同一个 `ChoiceDialogSpec` 传不传 `anchor`，
 渲染出来就是小菜单和全宽大列表两种完全不同的东西（见下表第一行）：
 
 | 规格 | 形态 | 什么时候用 | 硬约束 |
@@ -126,6 +127,7 @@ SettingsActivity
 | `ChoiceDialogSpec` | **锚定小菜单**：宽 `MenuWidth`，右缘对齐触发行，缩放弹出 / 缩回 | 行内**选值**（主题 / 语言 / 日志等级 / 记录的时间范围）与行内**动作菜单**（改文件名 / 改第几次 / 删除这条） | **必须传 `anchor`**。不传不报错，只会退化成全宽居中大列表 —— 形态错了，代码照样编译通过。动作菜单写 `selectedIndex = -1`（不画勾），点了没变化的项走 `disabledIndices` |
 | `ConfirmDialogSpec` | **贴底 sheet**：≤420dp、水平居中、抬到导航条之上 | 不可逆动作的二次确认：删除单条记录、清空台账、重置模块 | `anchor` 恒为 `null`；`message` 必须写清**范围**（见 NAMING §3 例外条） |
 | `TextInputDialogSpec` | 贴底 sheet，与 Confirm 同壳，随键盘上抬 | 就地改一个值或新增一条：改文件名、改「第几次」、新建关键字 | 只从行内动作菜单 / 按钮进入；**不要拿它做行内选值**（那属于 Choice）。输入非法时在 `validate` 里返回错误文案，弹层不关、错误显示在输入框下方 |
+| `TimeRangeDialogSpec` | 贴底 sheet | 时段 / 时间区间选择（追加次数时段） | `anchor` 恒为 `null`；内容是四根上下滑动的 `NumberPicker`（开始 时/分、结束 时/分），**不给打字**；起止相同或与已有段重叠时弹层不关、错误显示在滚轮下方 |
 | `ImageDialogSpec` | 贴底 sheet | 图片预览 | `anchor` 恒为 `null` |
 | `AgreementDialogSpec` | 贴底 sheet | 首次启动的免责声明门槛 | **不可关闭**，返回键只吞不放行 |
 

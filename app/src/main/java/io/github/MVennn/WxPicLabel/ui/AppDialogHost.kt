@@ -237,7 +237,8 @@ internal fun DialogHost(
     // 文本输入必须在这里登记 —— 漏了会走到下面的锚定分支，弹窗缩在左上角。
     val sheet = (
         spec is ConfirmDialogSpec || spec is TextInputDialogSpec ||
-            spec is AgreementDialogSpec || spec is ImageDialogSpec
+            spec is TimeRangeDialogSpec || spec is AgreementDialogSpec ||
+            spec is ImageDialogSpec
         ) && anchor == null
 
     // 进度：0 = 收起（初始态）、1 = 完全展开。

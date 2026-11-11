@@ -29,6 +29,7 @@ import io.github.MVennn.WxPicLabel.feature.imglabel.FriendExporter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RecordExporter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RenameRules;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RepeatCounter;
+import io.github.MVennn.WxPicLabel.feature.imglabel.RepeatWindow;
 import io.github.MVennn.WxPicLabel.feature.imglabel.ScopeGate;
 import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter;
@@ -95,7 +96,8 @@ public class WxPicLabelModule extends XposedModule {
 
     // ------------------------------------------------------------------ 兜底队列
 
-    private volatile ArrayList<String> pendingLabels;
+    /** 兜底队列：每一格带「文字 + 这次的序号」，见 {@link Draft}。 */
+    private volatile ArrayList<Draft> pendingDrafts;
     private volatile int pendingIndex;
     private volatile long pendingAt;
 
@@ -115,8 +117,11 @@ public class WxPicLabelModule extends XposedModule {
     private static final long CFG_TTL_MS = 3000L;
     /** 同名图片计数仓库（落在微信自己的 SharedPreferences 里）。 */
     private volatile RepeatCounter repeat;
-    /** 本批「选图条目 → 要发的文字」缓存，防止同一个条目被计两次次数。 */
-    private volatile IdentityHashMap<Object, String> batchTexts;
+    /** 本批「选图条目 → 要发的文字 + 序号」缓存，防止同一个条目被计两次次数。 */
+    private volatile IdentityHashMap<Object, Draft> batchTexts;
+    /** 「追加次数设置」解析结果缓存（原始字符串没变就复用，翻配置时不用每次重新切段）。 */
+    private volatile RepeatWindow windowCache;
+    private volatile String windowCacheRaw;
     /** 重命名规则表缓存（原始字符串没变就复用解析结果）。 */
     private volatile java.util.Map<String, String> renameCache;
     private volatile String renameCacheRaw;
@@ -441,8 +446,8 @@ public class WxPicLabelModule extends XposedModule {
         batchTexts = new IdentityHashMap<>();
         // 兜底队列若已为这一批算过文字（db0.u#Vj 先到），直接复用；
         // 同时把它清掉，免得接管发完以后轮询又把同一批文字补一遍。
-        final ArrayList<String> preLabels = pendingLabels;
-        pendingLabels = null;
+        final ArrayList<Draft> preDrafts = pendingDrafts;
+        pendingDrafts = null;
 
         final boolean hudToast = cfgBool(ConfigKeys.IMG_LABEL_PROGRESS_TOAST,
                 ConfigKeys.DEFAULT_IMG_LABEL_PROGRESS_TOAST);
@@ -494,17 +499,17 @@ public class WxPicLabelModule extends XposedModule {
                             });
                         }
                         waitImageSent(base, idx, total, intoGap, confirmGap, confirmTimeout);
-                        String label = preLabels != null && preLabels.size() == total
-                                ? preLabels.get(k)
-                                : textFor(entry);
-                        if (label == null || label.isEmpty()) {
+                        Draft draft = preDrafts != null && preDrafts.size() == total
+                                ? preDrafts.get(k)
+                                : draftFor(entry);
+                        if (draft.label.isEmpty()) {
                             // 空串 = 文字过滤把这一张筛掉了：图照发，文字不发，也不进记录
                             log("filter: text#" + idx + " skipped by rules");
-                        } else if (!sendLabel(label, idx, total)) {
+                        } else if (!sendLabel(draft.text(), idx, total)) {
                             log("takeover: text#" + idx + " not sent");
                         } else {
                             // 确认进了发送队列才记台账：没发出去的不算「第几次」
-                            noteSent(label);
+                            noteSent(draft);
                         }
                         sleepQuietly(gap);
                     } catch (Throwable t) {
@@ -514,7 +519,7 @@ public class WxPicLabelModule extends XposedModule {
                 }
                 listField.set(params, origin);
                 // 这一批的文字已经由接管发完，兜底轮询别再补一遍
-                pendingLabels = null;
+                pendingDrafts = null;
                 if (sentMisses > 0) {
                     // 有没等到确认的：等微信把在途上传排空再收工，
                     // 否则用户紧接着发的文字会排在图片上传后面转圈
@@ -593,11 +598,11 @@ public class WxPicLabelModule extends XposedModule {
             main.post(UiHud::end);
         }
         if (origin != null) {
-            ArrayList<String> labels = new ArrayList<>();
+            ArrayList<Draft> drafts = new ArrayList<>();
             for (Object o : origin) {
-                labels.add(textFor(o));   // 命中本批缓存，不会重复计数
+                drafts.add(draftFor(o));   // 命中本批缓存，不会重复计数
             }
-            armFallback(labels, 0);
+            armFallback(drafts, 0);
         }
         replayOriginal();
     }
@@ -850,15 +855,15 @@ public class WxPicLabelModule extends XposedModule {
         if (params != null) {
             lastTalker = talkerOf(params);
         }
-        if (params == null || pendingLabels != null || !featureEnabled()) {
+        if (params == null || pendingDrafts != null || !featureEnabled()) {
             return;
         }
         // 接管正在跑：这一批的文字由接管逐张发，兜底队列不许插一脚。
-        // 插进来还会把 batchTexts 清掉，textFor 于是重新 bump 一次 —— 文件名会凭空 +2/+3。
+        // 插进来还会把 batchTexts 清掉，draftFor 于是重新 bump 一次 —— 文件名会凭空 +2/+3。
         if (System.currentTimeMillis() < takeoverUntil) {
             return;
         }
-        // 「记忆/文件名」没勾：连文字都别算 —— RepeatCounter 在 textFor 里会 bump 次数，
+        // 「记忆/文件名」没勾：连文字都别算 —— RepeatCounter 在 draftFor 里会 bump 次数，
         // 算了却不发，下一次发送的 +N 就凭空跳号
         if (!memoryOn()) {
             return;
@@ -868,7 +873,7 @@ public class WxPicLabelModule extends XposedModule {
         if (!scopeAllowed(lastTalker)) {
             return;
         }
-        // 走到这里说明这一批没有接管（接管会先清掉 pendingLabels），
+        // 走到这里说明这一批没有接管（接管会先清掉 pendingDrafts），
         // 缓存属于上一批，换一份新的再算。
         batchTexts = new IdentityHashMap<>();
         Field f = findListField(params);
@@ -880,25 +885,25 @@ public class WxPicLabelModule extends XposedModule {
             if (list == null || list.isEmpty()) {
                 return;
             }
-            ArrayList<String> labels = new ArrayList<>();
+            ArrayList<Draft> drafts = new ArrayList<>();
             for (Object o : list) {
-                labels.add(textFor(o));
+                drafts.add(draftFor(o));
             }
             // 兜底发送整批共用同一个批次 id，记录页把它们折成一组
             curBatch = newBatchId();
-            armFallback(labels, 0);
-            log("fallback: armed at Vj, labels=" + labels);
+            armFallback(drafts, 0);
+            log("fallback: armed at Vj, drafts=" + drafts);
         } catch (Throwable t) {
             log("fallback: arm failed: " + t);
         }
     }
 
-    private void armFallback(ArrayList<String> labels, int from) {
-        if (labels == null || labels.isEmpty()) {
+    private void armFallback(ArrayList<Draft> drafts, int from) {
+        if (drafts == null || drafts.isEmpty()) {
             return;
         }
         pendingIndex = Math.max(0, from);
-        pendingLabels = labels;
+        pendingDrafts = drafts;
         pendingAt = System.currentTimeMillis();
     }
 
@@ -971,57 +976,57 @@ public class WxPicLabelModule extends XposedModule {
     }
 
     private void flushFallback() {
-        ArrayList<String> labels = pendingLabels;
-        if (labels == null) {
+        ArrayList<Draft> drafts = pendingDrafts;
+        if (drafts == null) {
             return;
         }
         if (!featureEnabled()) {
-            pendingLabels = null;
+            pendingDrafts = null;
             return;
         }
         // 「记忆」没勾：这批不带文件名，兜底队列直接清掉
         if (!memoryOn()) {
-            log("fallback: memory off, drop " + labels.size());
-            pendingLabels = null;
+            log("fallback: memory off, drop " + drafts.size());
+            pendingDrafts = null;
             return;
         }
         // 兜底队列也要过白名单这道闸，否则「接管没跑起来」时白名单会被绕过
         if (!scopeAllowed(lastTalker)) {
-            log("fallback: talker=" + lastTalker + " not in scope, drop " + labels.size());
-            pendingLabels = null;
+            log("fallback: talker=" + lastTalker + " not in scope, drop " + drafts.size());
+            pendingDrafts = null;
             return;
         }
         if (System.currentTimeMillis() < takeoverUntil) {
             return;   // 接管正在逐张发，别抢
         }
         if (System.currentTimeMillis() - pendingAt > 120_000L) {
-            log("fallback: expire, dropped " + (labels.size() - pendingIndex));
-            pendingLabels = null;
+            log("fallback: expire, dropped " + (drafts.size() - pendingIndex));
+            pendingDrafts = null;
             return;
         }
         if (!UiSender.hasInput()) {
             return;   // 聊天页还没回来
         }
         int i = pendingIndex;
-        if (i >= labels.size()) {
-            pendingLabels = null;
+        if (i >= drafts.size()) {
+            pendingDrafts = null;
             return;
         }
-        String label = labels.get(i);
+        Draft draft = drafts.get(i);
         pendingIndex = i + 1;
         pendingAt = System.currentTimeMillis();
-        boolean filtered = label == null || label.isEmpty();
-        boolean ok = !filtered && UiSender.send(main, label, null);
+        boolean filtered = draft.label.isEmpty();
+        boolean ok = !filtered && UiSender.send(main, draft.text(), null);
         if (filtered) {
             log("filter: fallback label#" + (i + 1) + " skipped by rules");
         } else {
-            log("fallback: label#" + (i + 1) + "/" + labels.size() + " " + label + " uiSent=" + ok);
+            log("fallback: label#" + (i + 1) + "/" + drafts.size() + " " + draft.text() + " uiSent=" + ok);
         }
         if (ok) {
-            noteSent(label);
+            noteSent(draft);
         }
-        if (pendingIndex >= labels.size()) {
-            pendingLabels = null;
+        if (pendingIndex >= drafts.size()) {
+            pendingDrafts = null;
             curBatch = null;
             pushRecords("fallback");
         }
@@ -1255,17 +1260,23 @@ public class WxPicLabelModule extends XposedModule {
         pushRecords("edits");
     }
 
-    /** 记一条发送事件进台账；失败只打日志，不影响发送。 */
-    private void noteSent(String label) {
+    /**
+     * 记一条发送事件进台账；失败只打日志，不影响发送。
+     *
+     * <p>序号直接取 {@link Draft} 里那个：它是这张图**当初算文字那一刻**定下的，
+     * 不是记账此刻重新推出来的。兜底队列可能隔几十秒才把这一格发出去，
+     * 用「现在」判定就会把一张 15:29 的图算进 15:30 起的时段里。
+     */
+    private void noteSent(Draft draft) {
         RepeatCounter c = repeatCounter();
-        if (c == null || label == null || label.isEmpty()) {
+        if (c == null || draft == null || draft.label.isEmpty()) {
             return;
         }
-        long seq = c.record(label, 0, curBatch, System.currentTimeMillis());
+        long seq = c.record(draft.label, draft.n, curBatch, System.currentTimeMillis());
         // 台账变过 = 记录页该更新了：批末那次推失败还有轮询里的退避重试兜着
         recordsDirty = true;
         if (seq <= 0L) {
-            log("records: note failed for " + label);
+            log("records: note failed for " + draft.label);
         }
     }
 
@@ -1296,50 +1307,81 @@ public class WxPicLabelModule extends XposedModule {
     }
 
     /**
-     * 这个选图条目要发的文字：原名，或「原名 +N」。
+     * 当前「追加次数设置」：配置字符串没变就复用解析结果。
+     *
+     * <p>只缓存**解析**、不缓存判定 —— 「在不在时段里」必须拿这次发送的时刻实时算，
+     * 否则跨过 15:30 之后还得等缓存过期才好使。
+     */
+    private RepeatWindow repeatWindow() {
+        String raw = cfgStr(ConfigKeys.IMG_LABEL_REPEAT_WINDOW,
+                ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_WINDOW);
+        if (raw == null) {
+            raw = "";
+        }
+        RepeatWindow cached = windowCache;
+        if (cached != null && raw.equals(windowCacheRaw)) {
+            return cached;
+        }
+        RepeatWindow parsed = RepeatWindow.parse(raw);
+        windowCacheRaw = raw;
+        windowCache = parsed;
+        return parsed;
+    }
+
+    /**
+     * 这个选图条目要发的文字，连同它在重复计数里的序号（见 {@link Draft}）。
      *
      * <p>认名字不认内容 —— 第二天重新截的同名图，内容变了也接着数。
      * 同一个条目在一批里可能被问两次（接管算一遍；失败后交回微信、{@code db0.u#Vj}
      * 再算一遍），用按**条目对象身份**的缓存挡住重复计数。
+     *
+     * <p>「追加次数设置」的闸门在 {@code bump} **之前**：不在时段里就压根不进计数表，
+     * 序号记 0，文字原样发出去。只在显示层藏号是不够的 —— 那样三点半前发过一次，
+     * 三点半后第一次就会被读数顶成第 2 次而 +2。
      */
-    private String textFor(Object entry) {
+    private Draft draftFor(Object entry) {
         String original = labelOfEntry(entry);
         if (original == null || original.isEmpty() || "unknown".equals(original)) {
-            return original;
+            return new Draft(original, 0);
         }
         // 重命名规则：命中就把文件名换成用户指定的文字。
         // 放在计数之前 —— 计数键跟着**实际发出去的那段文字**走，与「认名字不认内容」一致。
         String label = RenameRules.apply(renameRules(), original);
-        IdentityHashMap<Object, String> cache = batchTexts;
+        IdentityHashMap<Object, Draft> cache = batchTexts;
         if (cache != null) {
-            String hit = cache.get(entry);
+            Draft hit = cache.get(entry);
             if (hit != null) {
                 return hit;
             }
         }
         // 文字过滤：必须在计数**之前**判 —— 先 bump 再丢弃，下次发同一张图会凭空 +N。
-        // 返回空串表示「这一张只发图」；调用方据此跳过发文字，也不记台账。
+        // 空 label 表示「这一张只发图」；调用方据此跳过发文字，也不记台账。
         if (!textAllowed(label, original)) {
+            Draft skipped = new Draft("", 0);
             if (cache != null) {
-                cache.put(entry, "");
+                cache.put(entry, skipped);
             }
-            return "";
+            return skipped;
         }
-        if (!cfgBool(ConfigKeys.IMG_LABEL_REPEAT_COUNT, ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_COUNT)) {
-            return label;
+        boolean repeatOn = cfgBool(ConfigKeys.IMG_LABEL_REPEAT_COUNT,
+                ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_COUNT);
+        int n = 0;
+        if (repeatOn && repeatWindow().contains(System.currentTimeMillis())) {
+            RepeatCounter c = repeatCounter();
+            if (c != null) {
+                n = c.bump(label, cfgStr(
+                        ConfigKeys.IMG_LABEL_REPEAT_RESET, ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_RESET));
+            }
         }
-        int n = 1;
-        RepeatCounter c = repeatCounter();
-        if (c != null) {
-            n = c.bump(label, cfgStr(
-                    ConfigKeys.IMG_LABEL_REPEAT_RESET, ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_RESET));
-        }
-        String text = n >= 2 ? label + " +" + n : label;
+        Draft draft = new Draft(label, n);
         if (cache != null) {
-            cache.put(entry, text);
+            cache.put(entry, draft);
         }
-        log("repeat: label=" + label + " count=" + n + " text=" + text);
-        return text;
+        log("repeat: label=" + label + " count=" + n + " text=" + draft.text());
+        if (repeatOn && n == 0) {
+            log("repeat: label=" + label + " missed the window, not counted");
+        }
+        return draft;
     }
 
     /**
@@ -1614,6 +1656,38 @@ public class WxPicLabelModule extends XposedModule {
             super.log(Log.INFO, TAG, msg);
         } catch (Throwable ignored) {
             // 模块还没 attach 时忽略
+        }
+    }
+
+    /**
+     * 一张图这次要发的文字，连同它在重复计数里的序号。
+     *
+     * <p>为什么要有这个东西：台账要分清「时段内第 2 次」和「时段外根本没进累计」，
+     * 而兜底队列是**异步、跨批**发的。等到真正发出去那一刻再去查计数表，拿到的
+     * 是后来的状态 —— 一张 15:29 算好的图，15:31 才轮到它发，就该记「未累计」，
+     * 不是记「第 1 次」。所以序号必须在算文字的时候就跟着文字一起走。
+     */
+    private static final class Draft {
+
+        /** 台账主键：重命名之后、还没加「 +N」的名字；空串表示被文字过滤筛掉。 */
+        final String label;
+
+        /** 0 = 没进累计（时段外发出 / 重复功能关着）；≥1 = 这次是第几次。 */
+        final int n;
+
+        Draft(String label, int n) {
+            this.label = label == null ? "" : label;
+            this.n = n;
+        }
+
+        /** 实际发出去的文字：第 2 次起才带「 +N」，第 1 次与未累计都是原样。 */
+        String text() {
+            return n >= 2 ? label + " +" + n : label;
+        }
+
+        @Override
+        public String toString() {
+            return text();
         }
     }
 }

@@ -50,12 +50,14 @@ internal sealed interface Route {
     data object ImgLabelRecord : Route
     /** 三级：文字过滤（黑白名单） */
     data object ImgLabelFilter : Route
+    /** 三级：重复图片的追加时段（+N 只在时段内累计） */
+    data object ImgLabelRepeatWindow : Route
 }
 
 /** 三级页 → 它压在下面的那个二级页；不是三级页返回 null。 */
 private fun editParent(route: Route): Route? = when (route) {
     Route.ImgLabelScope, Route.ImgLabelRename, Route.ImgLabelRecord,
-    Route.ImgLabelFilter -> Route.ImgLabelSend
+    Route.ImgLabelFilter, Route.ImgLabelRepeatWindow -> Route.ImgLabelSend
     else -> null
 }
 
@@ -79,6 +81,7 @@ private object RouteSaver : Saver<Route, String> {
         Route.ImgLabelRename -> "img_label_rename"
         Route.ImgLabelRecord -> "img_label_record"
         Route.ImgLabelFilter -> "img_label_filter"
+        Route.ImgLabelRepeatWindow -> "img_label_repeat_window"
     }
 
     override fun restore(value: String): Route = when (value) {
@@ -89,6 +92,7 @@ private object RouteSaver : Saver<Route, String> {
         "img_label_rename" -> Route.ImgLabelRename
         "img_label_record" -> Route.ImgLabelRecord
         "img_label_filter" -> Route.ImgLabelFilter
+        "img_label_repeat_window" -> Route.ImgLabelRepeatWindow
         else -> Route.Home
     }
 }
@@ -303,6 +307,7 @@ internal fun MainScreen(initialRoute: Route = Route.Home) {
                                 onOpenRecord = { route = Route.ImgLabelRecord },
                                 onOpenRename = { route = Route.ImgLabelRename },
                                 onOpenFilter = { route = Route.ImgLabelFilter },
+                                onOpenRepeatWindow = { route = Route.ImgLabelRepeatWindow },
                             )
                         }
 
@@ -346,6 +351,13 @@ internal fun MainScreen(initialRoute: Route = Route.Home) {
                                 onBack = { route = Route.ImgLabelSend },
                             ) {
                                 ImgLabelFilterScreen()
+                            }
+
+                            Route.ImgLabelRepeatWindow -> SubScreen(
+                                title = stringResource(R.string.repeat_window_title),
+                                onBack = { route = Route.ImgLabelSend },
+                            ) {
+                                ImgLabelRepeatWindowScreen()
                             }
 
                             else -> Unit

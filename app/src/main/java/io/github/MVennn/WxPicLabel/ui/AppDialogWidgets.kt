@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.NumberPicker
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -334,6 +336,110 @@ internal fun DialogBody(controller: DialogController, spec: DialogSpec) {
                             } else {
                                 // 落配置 / 落动作一律等收起动画播完（见 DialogController.dismiss）
                                 controller.dismiss { spec.onConfirm(value) }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+
+        is TimeRangeDialogSpec -> {
+            // 滚轮值只在本弹层里活：`remember(spec)` 保证换一次弹窗就重新取初始值，
+            // 而弹层内的滑动不会被外层重组打回原值（和文本框逐字输入同一个理由）。
+            var start by remember(spec) { mutableIntStateOf(spec.startMinute) }
+            var end by remember(spec) { mutableIntStateOf(spec.endMinute) }
+            var error by remember(spec) { mutableStateOf<String?>(null) }
+            val colors = MiuixTheme.colorScheme
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = spec.title,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    color = colors.onSurfaceContainer,
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                )
+                if (spec.message.isNotEmpty()) {
+                    Text(
+                        text = spec.message,
+                        color = colors.onSurfaceContainer,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                    )
+                }
+                // 两组滚轮「开始 — 结束」。滚轮本身自带选中框与上下渐隐，
+                // 不再套一层底色/描边 —— 弹层已经是一张卡片（与文本框同一取舍）。
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    TimeWheelGroup(
+                        label = spec.startLabel,
+                        hour = start / 60,
+                        minute = start % 60,
+                        onHour = { start = it * 60 + start % 60 },
+                        onMinute = { start = (start / 60) * 60 + it },
+                    )
+                    Text(
+                        text = "—",
+                        color = colors.onSurfaceVariantSummary,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                    )
+                    TimeWheelGroup(
+                        label = spec.endLabel,
+                        hour = end / 60,
+                        minute = end % 60,
+                        onHour = { end = it * 60 + end % 60 },
+                        onMinute = { end = (end / 60) * 60 + it },
+                    )
+                }
+                error?.let { msg ->
+                    Text(
+                        text = msg,
+                        color = colors.error,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    DialogButton(
+                        text = spec.cancelText,
+                        emphasized = false,
+                        onClick = { controller.dismiss() },
+                        modifier = Modifier.weight(1f),
+                    )
+                    DialogButton(
+                        text = spec.confirmText,
+                        emphasized = true,
+                        onClick = {
+                            val bad = spec.validate(start, end)
+                            if (bad != null) {
+                                error = bad
+                            } else {
+                                // 落配置一律等收起动画播完（见 DialogController.dismiss）
+                                controller.dismiss { spec.onConfirm(start, end) }
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -742,4 +848,69 @@ private fun AgreementCheckRow(
                 .onGloballyPositioned { textBounds = it.boundsInWindow() },
         )
     }
+}
+
+/**
+ * 一组「时 : 分」滚轮（上方带一行小标签）。
+ *
+ * 只负责把两个 Int 交回去 —— 分钟换算、起止相同、与已有段重叠这些判断全在调用方，
+ * 这里不认识「时段」这个概念。
+ *
+ * 宽度按贴底弹层最窄的那一档排（420dp 上限 − 左右各 20dp 内边距）：
+ * 两组各 64 + 冒号 + 64，中间一个「—」，合计约 300dp，不会把弹层撑宽。
+ */
+@Composable
+private fun TimeWheelGroup(
+    label: String,
+    hour: Int,
+    minute: Int,
+    onHour: (Int) -> Unit,
+    onMinute: (Int) -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = label,
+            color = colors.onSurfaceVariantSummary,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(bottom = 2.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TimeWheel(value = hour, range = 0..23, onValueChange = onHour)
+            Text(
+                text = ":",
+                color = colors.onSurfaceContainer,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            TimeWheel(value = minute, range = 0..59, onValueChange = onMinute)
+        }
+    }
+}
+
+/**
+ * 单个数字滚轮（Miuix [NumberPicker]）：上下拖动、松手吸附到刻度。
+ *
+ * [NumberPicker] 的参数 `wrapAround` 打开 —— 23 点再往上滑回 0 点、59 分再往下滑回 0 分，
+ * 与 iOS 闹钟一致：想把 15:30 挪到 16:00，不必先往回滑一整圈。
+ *
+ * 这一层**不存值**：值存在弹层那一层（`remember(spec)`），换一次弹窗才会重置，
+ * 否则弹层自己的人重组一次滚轮就跳回初始刻度。
+ */
+@Composable
+private fun TimeWheel(
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit,
+) {
+    NumberPicker(
+        value = value,
+        onValueChange = onValueChange,
+        range = range,
+        // 两位数补零：滚轮里是「08」不是「8」，宽度与对齐才稳定
+        label = { v -> v.toString().padStart(2, '0') },
+        visibleItemCount = 3,
+        wrapAround = true,
+        modifier = Modifier.width(64.dp),
+    )
 }
