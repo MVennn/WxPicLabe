@@ -22,6 +22,8 @@
 
 **发版**：versionCode 10 / versionName 0.8.0，tag `10-0.8.0`；`build.cmd` 默认变体改为 release（debug 包实机掉帧，仍可 `build.cmd debug` 显式出）
 
+**收尾（同日）**：CI 的 build job 一直死在 `android-actions/setup-android@v3` —— 它默认装的 `tools` 包已从 SDK 仓库下架，31 秒就失败、后续步骤全 skipped；改成直接调 runner 预置的 `cmdline-tools/*/bin/sdkmanager` 装 `platforms;android-37.0`（包名带小版本号）与 `build-tools;35.0.0`、`36.0.0`。顺带修 `build.cmd` 把调用方环境里失效的 `ANDROID_SDK_ROOT` 当 SDK 用的问题；`PITFALLS` 补 §27、§28。
+
 ## 2026-11-06 · 命名规范收敛 + 发版口径对齐（完成）
 
 **用户报**：功能主标题与副标题没按 GSAuxiliary 的规范；Release 标题多带了中文描述。
