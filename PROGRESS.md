@@ -18,7 +18,7 @@
 - `build.cmd release` → BUILD SUCCESSFUL in 1m 12s；APK 1,419,160 B（debug 11.03 MB）；单 dex，`META-INF/xposed/*` 三件齐，keep 生效（mapping 里 `ImgLabelRepeatWindowScreenKt` / `TimeRangeDialogSpec` 均在）
 - `:app:testDebugUnitTest` 43 项全过：ConfigKeysTest 6 / RenameRulesTest 14 / RepeatWindowTest 11 / TextFilterTest 12
 - `python tools/check-docs.py` exit 0（20 篇，无断链无孤儿）
-- APK sha256 `bc19c21254d322c01c34553cb6150c91822103c5cb62e2f23d9b92ad55dcc77e`
+- 资产 sha256 `fe02a4cc293da2a6040786c4d882795f0f446fa7aae6491a77e127338e1fa0e0`（与 GitHub Release 的 digest 逐字节一致；首轮算出的 `bc19c2…` 是读到了写了一半的包，见 `docs/PITFALLS.md` §26）
 
 **发版**：versionCode 10 / versionName 0.8.0，tag `10-0.8.0`；`build.cmd` 默认变体改为 release（debug 包实机掉帧，仍可 `build.cmd debug` 显式出）
 

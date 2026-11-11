@@ -144,3 +144,9 @@
 - **现象**：新做的贴底弹层（时段滚轮）弹出来缩在屏幕左上角、只有内容那么宽；或者滚轮能滑，一松手又跳回打开时的刻度。
 - **根因**：①`ui/AppDialogHost.kt` 的 `sheet` 判定是**手写的类型白名单**（`spec is ConfirmDialogSpec || spec is TextInputDialogSpec || ...`），新 spec 不登记就走锚定分支，看起来像「锚点算错了」。②滚轮的当前值如果存在 `TimeWheel` 内部，每次重组都会用外部传入的初始值重建，滑不到别的位置。
 - **怎么避**：新 spec 一定同步改 `AppDialogHost.kt` 的 `sheet` 判定（贴底类才写进去，锚定菜单不是）。滚轮的 `value` 由弹层那一层持有（`remember(spec) { mutableIntStateOf(...) }`），`TimeWheel` 只做无状态渲染 + 回调；`remember` 的 key 必须带 `spec`，否则同一个 controller 连开两次会沿用上次的刻度。`NumberPicker` 的 `wrapAround = true` 才和 iOS 闹钟一致（23 点再往下是 0 点）。
+
+## 26. 算出来的 sha256 和 GitHub 上的对不上
+
+- **现象**：`build.cmd release` 已打印 `BUILD SUCCESSFUL`，立刻 `Get-FileHash` 算 sha256 记进 `PROGRESS.md` 与 Release 正文，上传后 GitHub 资产 digest 与记录不一致，**体积却一模一样**（1,419,160 B）。
+- **根因**：Gradle 打印 `BUILD SUCCESSFUL` 之后还有 daemon 收尾与 APK 的最终落盘（AGP 先写未对齐未签名的包到同一路径，再对齐、再签名）；这时读文件拿到的是中间态。体积相同、字节不同，肉眼完全看不出来。
+- **怎么避**：算 sha256 前先确认构建任务**已经退出**（后台 job 状态 `completed`），并且 `LastWriteTime` 已经稳定；上传后用 `gh release view <tag> --json assets` 的 `digest` 与本地 `Get-FileHash` 对齐，**以 GitHub 侧为准**回写记录。本仓 0.8.0 就是首轮记录成 `bc19c2…`、实际上传 `fe02a4…`，事后按 digest 改正的。
