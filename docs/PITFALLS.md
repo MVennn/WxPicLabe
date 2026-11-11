@@ -121,3 +121,8 @@
 - **现象**：设置里关掉「桌面图标」并隐藏成功，覆盖安装 / 更新 APK 后桌面又出现图标；设置页里开关还显示「关」。
 - **根因**：两层。① 隐藏靠 `PackageManager.setComponentEnabledSetting(alias, DISABLED, DONT_KILL_APP)` 写一条覆盖记录，覆盖安装会清掉它，alias 回落到 manifest 的 `android:enabled="true"`；② 原来只在 `WxPicApp.onCreate` 里按 `ModulePreferences` 同步，更新后用户没打开模块 App 就不执行，而且框架 binder 未连时读到本地缺省 `DEFAULT_DESKTOP_ICON = true`，反而把图标点亮。
 - **怎么避**：alias 在 manifest 改 `android:enabled="false"`，打开图标用 `COMPONENT_ENABLED_STATE_ENABLED`（`DEFAULT` 现在指向 false，再用它等于打不开）；开关值写进**独立** SharedPreferences `launcher_icon_state`（缺省 false）——绝不能写 `ConfigKeys.GROUP`，那个文件会被 `resetToDefaults()` 的 `clear()` 抹掉、被 `migrateLocalToRemote()` 遍历搬到远端，写它还会触发 `notifyChanged()` 与 observe 形成回路；静态 `PackageReplacedReceiver`（`exported=false`）接 `ACTION_MY_PACKAGE_REPLACED` 在更新后按镜像重放，`WxPicApp.onCreate` 兜底，两者都不挂在 `ModulePreferences.observe` 上；设置页开关状态也读同一份镜像，否则会出现「开关显示开、图标却隐藏」。LSPosed 设置入口由 `SettingsActivity` 本体的 `MAIN + MODULE_SETTINGS` 保证，禁用 alias 不影响它。
+## 22. 只改注释，release APK 的 sha256 也变了
+
+- **现象**：改的是 KDoc / 行注释，assembleRelease 产物体积几乎不动，但 GitHub Release 已发布 apk 的 sha256 对不上，用户侧校验失败。
+- **根因**：classes.dex 保留源码行号映射（debug info），注释增删会改变行号表，dex 字节随之变化；「同长度改动未必不变」。
+- **怎么避**：注释 / KDoc 级改动也按功能改动对待：跑完 assembleRelease 必须重新 gh release upload --clobber 并回写发布说明里的 sha256，不要把「只改注释」当成免验证改动。
