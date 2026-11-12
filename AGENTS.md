@@ -69,7 +69,7 @@
 ## 10. 构建
 
 - 仓根 `build.cmd`：把 `GRADLE_USER_HOME` / `TMP` / `ANDROID_USER_HOME` 重定向到工程内，不需要管理员权限。
-- 产物 `app\build\outputs\apk\debug\app-debug.apk`；`dist/`、`.gradle-home/`、`.android-home/`、`.tmp/` 都是本机产物，不进库。
+- 产物默认 `app\build\outputs\apk\release\app-release.apk`（`build.cmd` 不带参数即 release，开 R8，实机装这个）；显式 `build.cmd debug` 才出 `app\build\outputs\apk\debug\app-debug.apk`。`dist/`、`.gradle-home/`、`.android-home/`、`.tmp/` 都是本机产物，不进库。
 - SDK 解析顺序：环境 `ANDROID_SDK_ROOT`/`ANDROID_HOME`（须存在）→ 仓内 `.work\android-sdk` → `local.properties` 的 `sdk.dir`。`build.cmd` 里不写死任何绝对路径，且保持纯 ASCII（cmd.exe 按 OEM 代码页读 .cmd，中文注释会被当成命令）。
 - 改构建配置后必须实际跑一次 `build.cmd`，贴 `BUILD SUCCESSFUL` 与 APK 大小。
 

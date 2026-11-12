@@ -9,7 +9,7 @@
 | JDK | 17（`sourceCompatibility/targetCompatibility = 17`） |
 | Gradle | 8.11.1（wrapper） |
 | AGP | 8.10.1 |
-| compileSdk / targetSdk / minSdk | 37 / 36 / 26 |
+| compileSdk / targetSdk / minSdk | 37 / 36 / 27 |
 | Xposed API | `io.github.libxposed:api:102.0.0`（compileOnly，不进包） |
 
 ## 构建命令
