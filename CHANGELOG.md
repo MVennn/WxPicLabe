@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-12
+
 - 修复 `build.cmd` 把调用方环境里已失效的 `ANDROID_SDK_ROOT` 当成 SDK 用（本机该变量指向安装器留下的空目录，日志一直打印假路径，只靠 `local.properties` 兜底才编得过）；现在目录不存在就打印一行说明并丢弃，回落到 `sdk.dir`
-- 构建 CI 的 build job 换掉 `android-actions/setup-android@v3`：它默认安装的 `tools` 包已从 SDK 仓库下架，job 会死在 setup 阶段；现在直接调 runner 预置的 `sdkmanager` 安装 `platforms;android-37.0` 与 `build-tools;35.0.0`、`36.0.0`（`docs/BUILD.md`）
+- 修复 构建 CI 的 build job 换掉 `android-actions/setup-android@v3`：它默认安装的 `tools` 包已从 SDK 仓库下架，job 会死在 setup 阶段；现在直接调 runner 预置的 `sdkmanager` 安装 `platforms;android-37.0` 与 `build-tools;35.0.0`、`36.0.0`（`docs/BUILD.md`）
+- 文档 门面跟进 `README.md`：功能表补「文字过滤」（黑白名单，判定压在重复计数之前）、「发送记录」（可搜索、按时间段分组、改文件名 / 改第几次 / 删条目）两行，把「发送图片文件名」行改回它在设置页里的真名「增加 文件名」并注明出厂关闭、相册底栏有同款开关；「重复图片计数」改成「重复图片追加次数」并注明只累计设定时段内；「仅勾选的会话生效」注明出厂关闭（关 = 所有会话）；进度条与常亮拆成两个开关单列；补「从源码构建」一节（`build.cmd` 默认 release 开 R8，产物路径）
+- 文档 `docs/BUILD.md` 的 minSdk 由 26 订正为 27，与 `app/build.gradle.kts` 一致；`AGENTS.md` 补 release 默认产物路径（`app\\build\\outputs\\apk\\release\\app-release.apk`）
+- 文档 `docs/DESIGN-SYSTEM.md` 新增 §0.3「组件取用与参考来源」：官方件与自绘件的分层取用表（页面骨架 / 开关 / 行与箭头 / 弹层 / 图标 / 底栏 / 文字色七行，逐行写明为什么自绘）、新页面的三个参照顺序（本仓最像的一页 → Miuix 官方渲染 → 宿主 App 界面），以及配置类页面一律以「方案设置」为母版的口径
 
 ## [0.8.0] - 2026-11-11
 
