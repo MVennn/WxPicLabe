@@ -473,3 +473,20 @@
 - [x] 校准 `WeChatSender` 的发送入口：已判不可行（候选类全部失效），发送链路改由 `UiSender` 视图层承担
 - [ ] 引用条待 msgId / svrid 方案：WCDB native 无 Java 插入点，拿到 msgId 之前只发纯文字
 - [ ] UI（总开关 / 白名单）
+
+## 2026-11-12 · 门面跟进 + 发版 0.8.1（已发版）
+
+**需求（用户）**：README / docs 与当前代码对齐（门面跟进），随后发版 0.8.1。
+
+**改动（门面跟进）**
+- `README.md`：功能表补「文字过滤」「发送记录」两行；「发送图片文件名」改回设置页真名「增加 文件名」，注明出厂关闭、相册底栏有同款开关；「重复图片计数」改为「重复图片追加次数」，注明只累计设定时段内；「仅勾选的会话生效」注明出厂关闭（关 = 所有会话）；进度与常亮拆成两个开关；新增「从源码构建」一节
+- `docs/BUILD.md`：`minSdk` 26 → 27（对齐 `app/build.gradle.kts:21`）
+- `AGENTS.md`：补 release 默认产物路径
+- `docs/DESIGN-SYSTEM.md`：新增 §0.3「组件取用与参考来源」
+
+**发版**
+- versionCode 10 → 11、versionName 0.8.0 → 0.8.1
+- `build.cmd` 默认 release（R8 开）编出 `app/build/outputs/apk/release/app-release.apk`（1,419,160 B，sha256 `9EC068525367353040368111B804BE7CAF01036E9CAF326F818AC3CB6AD8D2C8`）；`aapt` 回读 versionCode=11 / versionName=0.8.1
+- tag `11-0.8.1`、Release `v0.8.1` 带资产 `WxPicLabel_11-0.8.1.apk`；门禁与 CI 全绿
+
+**提交**：`9ff2e2a` docs 门面、`1469999` build: 发版 0.8.1
