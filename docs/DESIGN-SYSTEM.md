@@ -8,8 +8,8 @@
 |---|---|
 | 适用范围 | `GSAuxiliary`、`WxPicLabe`（同源共享 UI 框架的两仓），以及今后从这两仓派生出的模块 |
 | 对应框架 | Jetpack Compose + Miuix **0.9.3**（锁版本，见第 1.2 节） |
-| 正本关系 | 本文件管**跨仓共性**；各仓 `docs/UI.md` 管**本仓专有页面与文件职责**；`docs/UI-MATERIAL.md` 管材质与弹层内部实现 |
-| 副本约定 | 两仓各存一份同内容副本。**改一份必须同步另一仓**，用 `fc /b` 或 `diff` 逐字比对后再提交 |
+| 正本关系 | 本文件管**跨仓共性**；各仓 `docs/UI.md` 管**本仓专有页面与文件职责**；材质与弹层内部实现见 `docs/LIQUID-GLASS.md`（玻璃三档正本）与 `docs/UI.md` §4（弹层体系） |
+| 副本约定 | 两仓各存一份同内容副本。**改一份必须同步另一仓**，用 `fc /b` 或 `diff` 逐字比对后再提交。唯一允许的差异是**指向本仓自己文档的引用**（本仓 `UI.md` / `LIQUID-GLASS.md` 这类文件名差异）；这类行两边各写各的，其余行必须逐字一致 |
 | 落地检查 | 提交前跑第 13 章自检表；改页面必过真机看一遍（Compose 布局问题编译期零报错） |
 
 ---
@@ -22,7 +22,7 @@
 |---|---|---|---|
 | 通用规范 | **本文件** | 骨架、间距、行型、字段形态、弹层选型、图标几何、文案、颜色语义、空态、反馈、无障碍 | 具体某页的分区内容 |
 | 本仓界面 | `docs/UI.md` | 文件职责表、本仓页面清单与分区序列、本仓专有形态 | 跨仓共通数值（本文已有） |
-| 材质实现 | `docs/UI-MATERIAL.md` | 自绘 DialogHost 内部、液态玻璃三档、组件清单与状态口径 | 设计取舍 |
+| 材质实现 | `docs/LIQUID-GLASS.md` + `docs/UI.md` §4 | 自绘 DialogHost 内部、液态玻璃三档、组件清单与状态口径 | 设计取舍 |
 
 **判据**：一个规则如果在另一仓也成立，就写进本文件；只有本仓有的页面形态，写进本仓 `docs/UI.md`。同一规则**不得**在两处各写一遍 —— 那是分叉的起点。
 
@@ -52,8 +52,8 @@
 | 行与箭头 | Miuix `BasicComponent` + **自绘** `ArrowRightIcon` / `DownArrowIcon` | 不用 `ArrowPreference`：Miuix 自带箭头的染色不生效（第 6.2 节）。九种行型都是 `BasicComponent` + 自绘件拼出来的 |
 | 弹层 | **自绘** `DialogHost` + 五种 spec | Miuix `OverlayDropdownPreference` / `OverlayDialog` / `MiuixPopupHost` **禁用**：库在自己的 `onClick` 里同步收起动画，与同步回写配置打架会闪退（第 5.1 节） |
 | 图标 | 自绘箭头 + `AppIcons` | Miuix 扩展图标（`MiuixIcons.Extended.*`）**不在 0.9.3 的产物里** |
-| 底栏 | 官方 `NavigationBar` 或自绘 `LiquidGlassDock` | 玻璃三档见 `UI-MATERIAL.md`；关玻璃退回官方件，两种形态的条目与顺序必须一致（第 8.3 节） |
-| 文字色 | 根容器补 `LocalContentColor provides MiuixTheme.colorScheme.onBackground` | `MiuixTheme(colors = …)` 这个重载**不**提供 `LocalContentColor`，漏了这一句输入框正文是黑的（`UI-HISTORY.md` 3.7.0 条） |
+| 底栏 | 官方 `NavigationBar` 或自绘 `LiquidGlassDock` | 玻璃三档见 `LIQUID-GLASS.md`；关玻璃退回官方件，两种形态的条目与顺序必须一致（第 8.3 节） |
+| 文字色 | 根容器补 `LocalContentColor provides MiuixTheme.colorScheme.onBackground` | `MiuixTheme(colors = …)` 这个重载**不**提供 `LocalContentColor`，漏了这一句输入框正文是黑的 |
 
 **照谁对齐** —— 新页面不要凭空想数值，按顺序找最近的一处：
 
@@ -62,7 +62,7 @@
 | ① | 本仓**最像的那一页** | 先翻第 14 章页面清单，同型页面的行型、间距、弹层直接复用；配置类页面另有母版，见表下 |
 | ② | **Miuix 官方渲染**（0.9.3 真机观感） | 圆角、阴影、字号档、按压高亮以它为准；自绘件要做到一眼看不出是自绘 |
 | ③ | **宿主 App 自己的界面** | 模块与宿主同屏共存（策略详情页三点菜单、筛选面板、计数栏），字号行高圆角向宿主看齐，不硬套设置页的数值 |
-| ✗ | 未登记的第三种观感 | M3 默认按钮、装饰性渐变这类不引入；确需新增，先在 `docs/UI-MATERIAL.md` 组件清单登记再动手（数值照抄不自己发明，第 2.3 节） |
+| ✗ | 未登记的第三种观感 | M3 默认按钮、装饰性渐变这类不引入；确需新增，先在第 3 章行型目录登记再动手（数值照抄不自己发明，第 2.3 节） |
 
 **配置类页面照「方案设置」。** 让用户自由搭配配置的页面 —— 多套方案、逐条取值、行尾 ⋮ 管排序与删除、新建行带展开动画 —— 一律以**方案设置**（功能页 → 智能盯盘 → 增加 配置 按钮）为母版：先照 `QuickConfigScreen.kt`（二级列表）+ `QuickConfigEditScreen.kt`（三级编辑）铺骨架，再换本页字段。现役按它做出来的两页是**复制设置**（`ZxCopyRuleScreen.kt` / `ZxCopyRuleEditScreen.kt`）与**聚合组设置**（`StrategyMergeScreen.kt` / `StrategyMergeEditScreen.kt`）；三页交互必须一致，用户不为同一件事学三种操作。
 
@@ -715,7 +715,7 @@ spec.onSelect(index); controller.dismiss()     // 错：动画期间落配置，
 | 二级 | 重命名规则 | `ImgLabelRenameScreen.kt` |
 | 二级 | 黑白名单 | `ImgLabelFilterScreen.kt` |
 | 二级 | 发送记录 | `ImgLabelRecordScreen.kt` |
-| 二级 | 免责声明 / 第三方组件 | `DisclaimerScreen.kt` / `NoticeScreen.kt` |
+| 二级 | 免责声明 / 第三方组件 | `Screens.kt`（`DisclaimerScreen()` / `NoticeScreen()`） |
 
 **WX 专有形态**：
 - 发送设置页六区：发送范围（开关 + 名单入口）／发送提示（两开关）／重复图片（开关 + 「追加次数设置」入口）／重命名（入口 + 「N 条规则」）／文字过滤（入口 + 「黑名单 · N 条关键字」）／记录（入口）。
@@ -746,6 +746,7 @@ spec.onSelect(index); controller.dismiss()     // 错：动画期间落配置，
 | 2026-11-12 | 同步 WxPicLabe 已落地的第 4 种字段形态「一行入口 + 滚轮」（`TimeRangeDialogSpec`，时段类有刻度值不让打字），补进 3.10 速查表、第 4 章标题与 5.1 选型表；两仓重新逐字对齐 |
 | 2026-11-12 | 0.3 补「配置类页面照方案设置」：多套方案、逐条取值、行尾 ⋮ 管排序删除、新建行带展开动画，母版 = `QuickConfigScreen.kt` / `QuickConfigEditScreen.kt`；现役复制设置与聚合组设置按它做 |
 | 2026-11-12 | 14.1 页面清单补齐聚合组设置、聚合组编辑、筛选条件保存设置（15 → 18 页） |
+| 2026-11-13 | 修正 7 处指向本仓不存在文档的引用：`UI-MATERIAL.md` / `UI-HISTORY.md` 只在 GSAuxiliary 落地，本仓没有；改指本仓 `docs/LIQUID-GLASS.md`、`docs/UI.md` §4、`docs/PITFALLS.md` 与 `CHANGELOG.md`，并把「组件清单」指向本文第 3 章行型目录 |
 | 2026-11-10 | 修正 4.2 与第 2 章：搜索框**不进卡**（卡底色 + 框底色 = 框套框），左右 `CardHMargin`、上下 4dp，且不与条件行同框；记录页改为「筛选节 = SmallTitle + 裸搜索框 + 时间范围卡」 |
 
 ---
@@ -755,6 +756,6 @@ spec.onSelect(index); controller.dismiss()     // 错：动画期间落配置，
 | 旧文档 | 现在的定位 |
 |---|---|
 | `docs/UI.md` | 本仓页面清单与文件职责；跨仓共性条款以本文件为准，重复的部分逐步删除 |
-| `docs/UI-MATERIAL.md` | 材质与弹层**内部实现**（DialogHost 绘制、玻璃三档、组件清单），不重复设计取舍 |
-| `docs/UI-HISTORY.md` | 踩坑史与历史决策（Miuix 锁版本、系统栏、体积），规范正文引用它而不复制它 |
+| `docs/LIQUID-GLASS.md` | 材质**内部实现**（正本：玻璃三档、面色规则、逐表面参数矩阵），不重复设计取舍 |
+| `docs/PITFALLS.md`、`CHANGELOG.md` | 踩坑史与历史决策（Miuix 锁版本、系统栏、体积），规范正文引用而不复制 |
 | `docs/NAMING.md` | 文案词表与命名规则，第 7 章引用它 |

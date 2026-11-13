@@ -193,7 +193,7 @@ ctx.getContentResolver().insert(Uri.parse("content://io.github.MVennn.WxPicLabel
 | 文件 | 改动 |
 | --- | --- |
 | `core/ConfigKeys.kt` | 新增 3 键 + 默认值；加入 `SNAPSHOT_KEYS` / `ALL_KEYS` / `FEATURE_PARAM_KEYS` / `DEFAULTS` |
-| `core/FriendCache.kt`（新） | 模块 App 侧好友缓存读写（JSON 序列化、时间戳、变更通知） |
+| `core/FriendCache.kt`（新；落地时未单列文件，缓存并进 `app/FriendBridgeProvider.kt` 的 `friends_json`，见其 `COL_JSON` / `KEY_JSON`） | 模块 App 侧好友缓存读写（JSON 序列化、时间戳、变更通知） |
 | `app/FriendBridgeProvider.kt`（新） | exported Provider；uid 白名单；分片累积落盘 |
 | `app/ModulePreferences.kt` | 无需改（StringSet 已在 `putValue` 支持） |
 | `AndroidManifest.xml` | 注册 `FriendBridgeProvider` |
@@ -238,14 +238,14 @@ ctx.getContentResolver().insert(Uri.parse("content://io.github.MVennn.WxPicLabel
 | 验证点 | 结果 | 日志 |
 | --- | --- | --- |
 | 好友抓取 `K()` | ✅ 53 行（rows=55，过滤 filehelper 后 53） | `friends: k4#K rows=55` |
-| 群聊抓取 `r()` | ✅ 2 个群，群名来自 nickname 列 | `friends[r1] room:22823231451@chatroom=华立原402班微信群` |
-| talker 主路 `qa0.k#c` | ✅ `wxid_4gcobapv09th22`（Empty. 单聊） | `takeover: intercepted … talker.c=wxid_4gcobapv09th22` |
+| 群聊抓取 `r()` | ✅ 2 个群，群名来自 nickname 列 | `friends[r1] room:<REDACTED-ROOM-ID>@chatroom=<REDACTED-GROUP-NAME>` |
+| talker 主路 `qa0.k#c` | ✅ `<REDACTED-WXID-A>`（Empty. 单聊） | `takeover: intercepted … talker.c=<REDACTED-WXID-A>` |
 | talker 兜底 `ia5.a#o()` | ✅ 与主路**逐字符一致** | 同一条日志 `talker.ia5a=…` |
-| 接管发送 | ✅ 图 1213ms 确认发出，文件名随后 | `text#1/1 label=臻宝科技 688797 queued=true` |
+| 接管发送 | ✅ 图 1213ms 确认发出，文件名随后 | `text#1/1 label=IMG_TEST_B.jpg queued=true` |
 | 子进程（push/appbrand） | ❌ `contact storage service not resolved` —— 正常，服务只在主进程 | `friends: fetched 0` |
-| 名单内发送（Adam.） | ✅ 接管，图 + 文件名 | `takeover: intercepted … talker.c=wxid_fvun2vlk6x9n22` → `text#1/1 label=臻宝科技 688797 +3` |
-| 名单外发送（Empty.） | ✅ 不接管，图照发、无文件名 | `takeover: talker=wxid_4gcobapv09th22 not in scope, let wechat send` |
-| 兜底队列 | ✅ 同一道闸也拦住 | `fallback: talker=wxid_4gcobapv09th22 not in scope, drop 1` |
+| 名单内发送（Adam.） | ✅ 接管，图 + 文件名 | `takeover: intercepted … talker.c=<REDACTED-WXID-B>` → `text#1/1 label=IMG_TEST_B.jpg +3` |
+| 名单外发送（Empty.） | ✅ 不接管，图照发、无文件名 | `takeover: talker=<REDACTED-WXID-A> not in scope, let wechat send` |
+| 兜底队列 | ✅ 同一道闸也拦住 | `fallback: talker=<REDACTED-WXID-A> not in scope, drop 1` |
 | 设置页名单 | ✅ 群聊 2 / 好友 53 全部列出，勾选后「已选 1 个」 | 截图 `.tmp/anim_f2.png` |
 
 结论：**好友 / 群抓取与 talker 取值在真机上成立**，名单数据全部来自当前登录账号（换号即换名单）。剩下的工作是按 §3.3 / §3.4 把判定闸与 Provider 回传接上。

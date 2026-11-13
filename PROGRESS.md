@@ -62,7 +62,7 @@
 
 **验证（MuMu Android 12 / 微信 8.0.80 / release 包）**
 - 重命名端到端：规则 `RENAMED_OK->RENAMED_TEST_OK` → 发该图 → 日志 `repeat: label=RENAMED_TEST_OK count=1` → `takeover: text#1/1 label=RENAMED_TEST_OK`，聊天里收到的就是改名后的文字
-- 记录页：`共 8 条记录`，列出 `RENAMED_TEST_OK 第 1 次 · 11-06 14:03`、`臻宝科技 688797 第 13 次` 等（uiautomator dump 实证）
+- 记录页：`共 8 条记录`，列出 `RENAMED_TEST_OK 第 1 次 · 11-06 14:03`、`IMG_TEST_B.jpg 第 13 次` 等（uiautomator dump 实证）
 - 三级页导航：发送设置 → 重命名规则 / 发送记录 进出正常（Android 12 无 predictive back，手势动画按 GSAuxiliary 已验证的实现移植，待 Android 13+ 真机确认）
 - `build.cmd testDebugUnitTest` 6/6 绿；`check-docs.py` / `check-secrets.py` 全绿
 
@@ -81,7 +81,7 @@
 
 **验证（MuMu Android 12 / 微信 8.0.80 / release 包）**
 - 进页自动刷新：微信进程 **1 秒内** `friends: refresh token changed, re-sync` → `fetched 55`（修复前写令牌后 3 分钟零反应）
-- 选择页摘要显示 `共 55 个会话 · 名单更新于 11-06 13:21`；点顶卡展开已选名单（uiautomator dump：`Adam.` / `wxid_fvun2vlk6x9n22` 出现在卡片内，y=252/282），点行即取消勾选
+- 选择页摘要显示 `共 55 个会话 · 名单更新于 11-06 13:21`；点顶卡展开已选名单（uiautomator dump：`Adam.` / `<REDACTED-WXID-B>` 出现在卡片内，y=252/282），点行即取消勾选
 - `刷新名单` 行刷新中显示「正在刷新名单…」，完成后回到常态摘要
 - `build.cmd release` 45 s 成功；`check-docs.py` 16 篇全绿
 
@@ -227,7 +227,7 @@
 - [x] 逐张补发链路实跑通过（模拟入库）：`image#1→甲`、`image#2→乙`、`image#3→丙`，三次 `sent=true`，每条间隔 ~20ms
 - [x] 入库 Hook 扩到 `g9` 上全部 7 个「首参是 f9」的方法（`Zb`/`a(f9,ZZ)`/`mc`/`qc`/`Ha`/`Ea`/`dd`）；实测文本发送会连过 `a(f9,ZZ)` 与 `Zb(f9)` 两条，已加 2 秒去重
 - [x] 修掉本轮真因：入库 Hook 只在 `Activity#onResume` 里安装，微信启动时 LauncherUI 已 resume 完 → 该进程 7 个 Hook 一个没装（21:05 日志 `insert via=` 计数 0）。改为启动后轮询当前 Activity 的真实 loader 主动安装，冷启动实测 `hooked storage inserts: 7 methods on g9` 自动出现
-- [x] **决定性证据（21:11 实测）**：图片消息一直被入库 Hook 抓到——`insert via=a q0=69 alt=3 talker=wxid_fvun2vlk6x9n22 c=<msg><img cdnthumbheight…`；问题是批次武装发生在 `chain.proceed()` 之后，比图片入库晚 0.8 秒（`21:11:48.7` 图 vs `21:11:49.5` batch armed）
+- [x] **决定性证据（21:11 实测）**：图片消息一直被入库 Hook 抓到——`insert via=a q0=69 alt=3 talker=<REDACTED-WXID-B> c=<msg><img cdnthumbheight…`；问题是批次武装发生在 `chain.proceed()` 之后，比图片入库晚 0.8 秒（`21:11:48.7` 图 vs `21:11:49.5` batch armed）
 - [x] 修复：新增 `armBatchFast()`，在 `chain.proceed()` **之前**解析 Intent 并武装批次；`captureSelection` 只在未武装时兜底
 - [x] 时序仍不可靠（21:18 实测：图片入库 21:18:52.8，`batch armed early` 21:18:53.168，仍晚 0.3 秒）→ 改为**顺序无关**：始终缓存最近 30 秒的图片入库，批次到达时按时间回填并立即补发
 - [x] 日志补 `r0=`（发送者 wxid），用于确认 `x0` 到底是会话还是发送者
@@ -272,7 +272,7 @@
 - [x] 反编译 `AlbumPreviewUI#onActivityResult`（44541 字符体）：只做 `putStringArrayListExtra("key_select_image_list", …)` + `Q8(-1,intent)`（setResult）+ `finish()`，**本身不发送**，发送在更早的 `ImagePreviewUI`
 - [x] 反编译 `g9#Zb(f9)` → 只有 `return a(f9, false, true)`；`f9` 有 12 字段 / 119 方法，字段名全混淆
 - [x] **关键发现**：上一轮 3 条文件名确实发出去了，只是落到 `Adam.` 会话（列表里 Adam. 行显示「征和工业 003033」），图片在 `Empty.`
-- [x] `debug.wxpiclabel.talker` 探针确认 `Empty.` 的会话 id 是 `wxid_4gcobapv09th22`；图片消息里这个值在 `R0`，不在 `x0`
+- [x] `debug.wxpiclabel.talker` 探针确认 `Empty.` 的会话 id 是 `<REDACTED-WXID-A>`；图片消息里这个值在 `R0`，不在 `x0`
 - [x] 修：`onMessageInserted` 取会话优先 `R0`、回退 `x0`
 
 ## 2026-11-05 · 会话收尾（交接状态）
