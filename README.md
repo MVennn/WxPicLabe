@@ -51,11 +51,12 @@ Make WeChat Picture Great Again！
 
 ### 从源码构建
 
-在 Windows 仓根执行 `build.cmd`，**默认出 release 包**（开 R8，实机与日常测试都装这一个）；要 debug 包必须显式带上变体词：
+在 Windows 仓根执行 `build.cmd`，**默认出 release 包**（开 R8，实机与日常测试都装这一个）；debug 变体自 2026-11-13 起同样关 `debuggable` + 开 R8，**实机不再掉帧**，要真正可调试的包再显式退回：
 
 ```cmd
-build.cmd          :: release（默认）
-build.cmd debug    :: debug，只有要 debuggable 抓日志时才用
+build.cmd          :: release（默认），产物就是产品包
+build.cmd debug    :: debug，与 release 同口径构建（R8 + 关 debuggable）
+gradlew :app:assembleDebug -Pwx.debuggable=true -Pwx.minifyDebug=false   :: 真·可调试包
 ```
 
 产物分别是 `app\build\outputs\apk\release\app-release.apk` 与 `app\build\outputs\apk\debug\app-debug.apk`；缓存重定向到工程内、SDK 解析顺序与版本钉死见 [docs/BUILD.md](https://github.com/MVennn/WxPicLabe/blob/main/docs/BUILD.md)。

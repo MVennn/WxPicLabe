@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- 优化 构建 `debug` 变体默认按「性能」构建（2026-11-13）：`isDebuggable = false` + `isMinifyEnabled` + `isShrinkResources`，与 `release` 共用同一套 `app/proguard-rules.pro`。此前 debug 包 `debuggable=true`，ART 不做 AOT、Compose 的 lambda 未内联，实机左右切页明显掉帧 —— 这也是本仓「只出 release」的由来；现在 debug 变体同样能测出真实流畅度。要断点 / `run-as` / 可读混淆栈时用 `gradlew :app:assembleDebug -Pwx.debuggable=true -Pwx.minifyDebug=false` 退回（`docs/BUILD.md` §2.1）
+- 优化 构建口径同步到 `build.cmd` 与 `README.md`：`build.cmd debug` 不再标注「实机掉帧」，与 release 同口径构建；`.cmd` 注释里写清退回真可调试包的命令。文档里的单测命令随之统一成 `build.cmd :app:testReleaseUnitTest`（纯 JVM 单测与变体无关，编 debug 单测等于白跑一遍 R8），`docs/IMG-LABEL-RENAME.md` 与 `docs/IMG-LABEL-TEXT-FILTER.md` 一并订正
+
 ## [0.8.1] - 2026-11-12
 
 - 修复 `build.cmd` 把调用方环境里已失效的 `ANDROID_SDK_ROOT` 当成 SDK 用（本机该变量指向安装器留下的空目录，日志一直打印假路径，只靠 `local.properties` 兜底才编得过）；现在目录不存在就打印一行说明并丢弃，回落到 `sdk.dir`

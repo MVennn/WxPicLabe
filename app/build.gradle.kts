@@ -12,6 +12,10 @@ plugins {
 // Miuix（HyperOS 风格 Compose UI）。不要升到 0.9.4+：会要求 AGP >= 9.1。
 val miuixVersion = "0.9.3"
 
+// 构建开关读 -P 属性，默认值见 buildTypes。
+//   gradlew :app:assembleDebug -Pwx.debuggable=true -Pwx.minifyDebug=false
+fun flag(name: String): Boolean? = providers.gradleProperty(name).orNull?.toBooleanStrictOrNull()
+
 android {
     namespace = "io.github.MVennn.WxPicLabel"
     compileSdk = 37
@@ -36,7 +40,27 @@ android {
 
     buildTypes {
         debug {
+            // 默认按「性能」构建：关 debuggable + 开 R8，与 release 同一口径。
+            //
+            // 实测（2026-11-13，与 GSAuxiliary 同源）：debuggable=true 时 ART 不做 AOT、
+            // Compose 的 lambda 也没被内联，实机左右切页明显掉帧；关掉之后构建产物与
+            // release 同量级，同代码实机不再掉帧。debug 变体原本唯一的价值是调试便利，
+            // 而「能测出真实流畅度」这件事更需要它。
+            //
+            // 需要断点 / run-as / 可读混淆栈时显式退回：
+            //   gradlew :app:assembleDebug -Pwx.debuggable=true -Pwx.minifyDebug=false
+            //
+            // 关 debuggable 不影响 adb 调试通道：DebugConfigProvider 走 uid 白名单
+            // （root/shell）判定，不依赖 run-as。
+            isDebuggable = flag("wx.debuggable") ?: false
+            val minifyDebug = flag("wx.minifyDebug") ?: true
+            isMinifyEnabled = minifyDebug
+            isShrinkResources = minifyDebug
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
         release {
             // R8 必须开：界面卡不卡主要就差在这一步。
@@ -44,8 +68,8 @@ android {
             // 实测（2026-11-06）：同一份 UI 代码在 debug 包里左右切页明显掉帧，
             // release（R8 + shrinkResources）就顺 —— 两包在模拟器上帧数据一致
             // （p99 10ms / 0 jank），差别只在实机上被放大的那部分 CPU 开销：
-            // debug 包 debuggable=true，ART 不做 AOT、Compose 的 lambda 也没被内联，
-            // 每帧的重组 / 绘制调用都是完整走一遍。
+            // 旧 debug 包 debuggable=true，ART 不做 AOT、Compose 的 lambda 也没被内联，
+            // 每帧的重组 / 绘制调用都是完整走一遍；2026-11-13 起 debug 也按本条构建。
             //
             // 入口类的 keep 规则见 proguard-rules.pro（漏一条就是「装上不生效」）。
             isMinifyEnabled = true

@@ -97,4 +97,4 @@
 - 单测：`RenameRulesTest` 覆盖四种分隔符与优先级、注释与空行、左右任一为空、两端 trim、保序与重复覆盖、CRLF、`apply` 精确匹配（不做子串）与空表/null 安全；
 - 真机（MuMu 安卓 12）：新建空串/多行/格式错/重名四种拦截各试一次，✕ 删单条后其它条目顺序不变，
   清空走二次确认且取消不落地，导入同一份文件两次第二次回报「跳过 N 条」；
-- 门禁：`python tools/check-docs.py` 与 `build.cmd debug :app:testDebugUnitTest`。
+- 门禁：`python tools/check-docs.py` 与 `build.cmd :app:testReleaseUnitTest`。

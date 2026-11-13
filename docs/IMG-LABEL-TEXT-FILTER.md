@@ -148,7 +148,7 @@
 空表不吞批、空文本不算命中。纯 JVM 跑，不需要设备：
 
 ```cmd
-build.cmd debug :app:testDebugUnitTest
+build.cmd :app:testReleaseUnitTest
 ```
 
 改判定逻辑先改这份单测，改完直接跑；它挂了说明发出的文字会跟着错，别只盯着界面。

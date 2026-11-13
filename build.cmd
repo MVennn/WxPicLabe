@@ -54,12 +54,14 @@ if defined ANDROID_SDK_ROOT (
 )
 REM ---------------------------------------------------------------------------
 REM  Target variant:  build.cmd          -> release (default, R8 on; the one to install)
-REM                  build.cmd debug    -> debug (faster to build, LAGGY on real devices)
+REM                  build.cmd debug    -> debug (same R8 + performance profile as release)
 REM  Everything after the variant word is forwarded to Gradle.
 REM ---------------------------------------------------------------------------
 REM  %* 不受 shift 影响，所以这里手动把变体词摘掉、其余参数逐个收集
-REM  Default is release on purpose: debug builds drop frames on real devices, so a
-REM  debug APK is never a useful thing to hand over for testing.
+REM  Default is release on purpose: release is the product artifact. Since 2026-11-13 the
+REM  debug variant is built with isDebuggable=false + R8 too, so it no longer drops frames.
+REM  Need a REAL debuggable build (breakpoints / run-as / readable stack):
+REM    gradlew :app:assembleDebug -Pwx.debuggable=true -Pwx.minifyDebug=false
 set "VARIANT=release"
 if /I "%~1"=="release" (
     shift

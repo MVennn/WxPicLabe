@@ -1,5 +1,7 @@
 # ---------------------------------------------------------------------------
-# release 构建已开启 R8（isMinifyEnabled / isShrinkResources = true）。
+# release 与 debug 均开启 R8（isMinifyEnabled / isShrinkResources = true）。
+# debug 默认按「性能」构建（isDebuggable = false），见 docs/BUILD.md §2.2；
+# 退回可调试包：gradlew :app:assembleDebug -Pwx.debuggable=true -Pwx.minifyDebug=false
 #
 # 下面每一条 keep 都对应一个「R8 无法从代码里看出、但运行期确实会用到」的入口。
 # 新增入口时请同步补规则，否则会出现「编译通过、装上去不生效」这种最难查的问题。
