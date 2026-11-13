@@ -490,3 +490,23 @@
 - tag `11-0.8.1`、Release `v0.8.1` 带资产 `WxPicLabel_11-0.8.1.apk`；门禁与 CI 全绿
 
 **提交**：`9ff2e2a` docs 门面、`1469999` build: 发版 0.8.1
+## 2026-11-13 · debug 变体按性能构建（不再外发 debug 包）
+
+**起因**：用户要求两个模块的 debug 包都不再掉帧（原话「wxpiclabe的debug包也是这个情况，需要同步修改，但是不用产出debug包给我」）。
+
+**根因**：模块 dex 注入宿主进程执行，但 ART 的编译产物由模块 APK 安装时的 android:debuggable 决定 —— debuggable=true 时不 AOT，Compose lambda 也不内联，每帧完整走一遍；与代码分支无关。
+
+**改动**
+- `app/build.gradle.kts`：顶层加 `fun flag(name: String): Boolean? = providers.gradleProperty(name).orNull?.toBooleanStrictOrNull()`；debug 块改为 `isDebuggable = flag("wx.debuggable") ?: false`、`val minifyDebug = flag("wx.minifyDebug") ?: true`、`isMinifyEnabled = minifyDebug`、`isShrinkResources = minifyDebug`，proguardFiles 与 release 同一套
+- 本仓全仓无 `BuildConfig.DEBUG` 使用点，因此不像 GSAuxiliary 那样需要另造 DEV_BUILD 字段
+- `app/proguard-rules.pro` 头注释、`build.cmd` 变体说明与退回命令（`-Pwx.debuggable=true -Pwx.minifyDebug=false`）
+- 文档口径同步：`README.md`、`docs/BUILD.md` 重写为「两个变体同一口径」、`docs/IMG-LABEL-RENAME.md`、`docs/IMG-LABEL-TEXT-FILTER.md`、`CHANGELOG.md` Unreleased；三处旧命令 `:app:testDebugUnitTest` 改为 `:app:testReleaseUnitTest`
+
+**验证**
+- `build.cmd release` 54s；`build.cmd debug` 1m 3s；`build.cmd :app:testReleaseUnitTest` 4 类 43 例 0 失败
+- debug APK 12.2 MB → 1,419,760 B（−88.9%）；debug `classes.dex` 2,793,204 B、`class_defs=3,129`，与 release 同量级
+- debug 的 `BuildConfig` 是 `DEBUG = false`、`BUILD_TYPE = "debug"`；`aapt2 dump xmltree` 的 `<application>` 下无 android:debuggable
+- keep 8/8 全保留：`WxPicLabelModule` / `WxPicApp` / `SettingsActivity` / `DebugConfigProvider` / `FriendBridgeProvider` / `feature.imglabel` / `ConfigKeys` / `io.github.libxposed.service`
+- `python tools\check-docs.py`、`python tools\check-secrets.py` 各 exit 0
+
+**提交**：`7382b24`
