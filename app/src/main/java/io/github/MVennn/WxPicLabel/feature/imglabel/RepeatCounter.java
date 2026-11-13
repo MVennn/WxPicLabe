@@ -100,7 +100,7 @@ public final class RepeatCounter {
             int count = parseCount(strOf(key, null)) + 1;
             prefs.edit()
                     .putString(key, count + "|" + System.currentTimeMillis())
-                    .commit();
+                    .apply();
             trimIfNeeded();
             return count;
         } catch (Throwable t) {
@@ -224,7 +224,7 @@ public final class RepeatCounter {
             prefs.edit()
                     .putLong(KEY_SEQ, seq)
                     .putString(EVENT + seq, atMs + "|" + want + "|" + b + "|" + base)
-                    .commit();
+                    .apply();
             trimEventsIfNeeded();
             return seq;
         } catch (Throwable t) {
@@ -333,7 +333,7 @@ public final class RepeatCounter {
             if (!changed) {
                 return false;
             }
-            ed.commit();
+            ed.apply();
             rebuildCounters(dirty);
             return true;
         } catch (Throwable t) {
@@ -347,7 +347,7 @@ public final class RepeatCounter {
             return;
         }
         try {
-            prefs.edit().putString(KEY_EDITS, token).commit();
+            prefs.edit().putString(KEY_EDITS, token).apply();
         } catch (Throwable ignored) {
             // 记不上只会让模块 App 多应用一次（幂等），不影响数据
         }
@@ -421,7 +421,7 @@ public final class RepeatCounter {
         prefs.edit()
                 .clear()
                 .putString(KEY_RESET, wanted)
-                .commit();
+                .apply();
         return true;
     }
 
@@ -449,7 +449,7 @@ public final class RepeatCounter {
             budget -= total;
         }
         ed.putLong(KEY_SEQ, seq);
-        ed.commit();
+        ed.apply();
     }
 
     /** 解析全部计数键（不排序、不迁移）。 */
@@ -543,7 +543,7 @@ public final class RepeatCounter {
             Long at = lastAt.get(label);
             ed.putString(PREFIX + label, n + "|" + (at == null ? 0L : at));
         }
-        ed.commit();
+        ed.apply();
     }
 
     /** 台账超过 {@link #MAX_EVENTS} 条时，按时间从旧到新删掉多出来的那些。 */
@@ -558,7 +558,7 @@ public final class RepeatCounter {
         for (int i = 0; i < excess && i < all.size(); i++) {
             ed.remove(EVENT + all.get(i).seq);
         }
-        ed.commit();
+        ed.apply();
     }
 
     /** {@code "<次数>|<时间戳>"} 里的次数；解析不出来一律当 0。 */
@@ -620,6 +620,6 @@ public final class RepeatCounter {
         for (int i = 0; i < excess && i < entries.size(); i++) {
             ed.remove(entries.get(i).getKey());
         }
-        ed.commit();
+        ed.apply();
     }
 }

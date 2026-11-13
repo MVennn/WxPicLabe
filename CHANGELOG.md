@@ -2,8 +2,12 @@
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-13
+
 - 优化 构建 `debug` 变体默认按「性能」构建（2026-11-13）：`isDebuggable = false` + `isMinifyEnabled` + `isShrinkResources`，与 `release` 共用同一套 `app/proguard-rules.pro`。此前 debug 包 `debuggable=true`，ART 不做 AOT、Compose 的 lambda 未内联，实机左右切页明显掉帧 —— 这也是本仓「只出 release」的由来；现在 debug 变体同样能测出真实流畅度。要断点 / `run-as` / 可读混淆栈时用 `gradlew :app:assembleDebug -Pwx.debuggable=true -Pwx.minifyDebug=false` 退回（`docs/BUILD.md` §2.1）
 - 优化 构建口径同步到 `build.cmd` 与 `README.md`：`build.cmd debug` 不再标注「实机掉帧」，与 release 同口径构建；`.cmd` 注释里写清退回真可调试包的命令。文档里的单测命令随之统一成 `build.cmd :app:testReleaseUnitTest`（纯 JVM 单测与变体无关，编 debug 单测等于白跑一遍 R8），`docs/IMG-LABEL-RENAME.md` 与 `docs/IMG-LABEL-TEXT-FILTER.md` 一并订正
+- 优化 把常驻 700ms 兜底轮询、记录回传与反射方法查找搬出微信主线程：`startFallbackPoller()` 改跑 `HandlerThread("wxpiclabel-poller")`，只有必须读 View 的 `flushFallback()` 用 `main.post` + `AtomicBoolean flushPending` CAS 合并回主线程；`pushRecords` 统一 hop 到 worker，`SystemProperties.get`、消息 `getType`、`Reflect.findMethod/findField` 全部按 Class 缓存 Method（含查无哨兵）；本地台账 9 处 `.commit()` 改 `.apply()`，跨进程 Provider 末片拼 JSON 的 `.commit()` 保留
+- 修复 发完图片上滑 / 使用微信时掉帧（功能总开关出厂默认关闭也会卡）：轮询唯一闸门原来只判 `mainProcess`、不读 `featureEnabled()`，每轮 6 个 check + 两次 prop 反射 + 3s TTL 跨进程重附着都压在主线程；相册 `OnGlobalLayoutListener` 只 add 不 remove 且每次布局拼 kids 字符串并 `Log.i`。现在监听只挂一个常驻实例、默认零分配，输入框查找走 WeakReference 缓存快路径。详见 `docs/PITFALLS.md` §29
 
 ## [0.8.1] - 2026-11-12
 

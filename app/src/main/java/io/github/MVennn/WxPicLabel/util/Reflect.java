@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 极简反射工具。
@@ -19,6 +20,115 @@ import java.util.List;
 public final class Reflect {
 
     private Reflect() {
+    }
+
+    private static final Object NOT_FOUND = new Object();
+
+    /** findMethod 缓存：命中直接复用已 setAccessible 的 Method；查无用 NOT_FOUND 哨兵占位。 */
+    private static final ConcurrentHashMap<MethodKey, Object> METHOD_CACHE =
+            new ConcurrentHashMap<>();
+
+    /** findField 缓存：命中直接复用已 setAccessible 的 Field；查无用 NOT_FOUND 哨兵占位。 */
+    private static final ConcurrentHashMap<FieldKey, Object> FIELD_CACHE =
+            new ConcurrentHashMap<>();
+
+    /** 缓存键 = 类身份 + 方法名 + 参数签名；clone 防止调用方事后改数组串味。 */
+    private static final class MethodKey {
+        final Class<?> clazz;
+        final String name;
+        final Class<?>[] paramTypes;
+
+        MethodKey(Class<?> clazz, String name, Class<?>[] paramTypes) {
+            this.clazz = clazz;
+            this.name = name;
+            this.paramTypes = paramTypes == null ? null : paramTypes.clone();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof MethodKey)) {
+                return false;
+            }
+            MethodKey other = (MethodKey) o;
+            return clazz == other.clazz
+                    && name.equals(other.name)
+                    && Arrays.equals(paramTypes, other.paramTypes);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = 31 * System.identityHashCode(clazz) + name.hashCode();
+            // null 参数数组（任意签名）与空数组（无参方法）必须落在不同桶。
+            return 31 * result
+                    + (paramTypes == null ? 0 : 1 + Arrays.hashCode(paramTypes));
+        }
+    }
+
+    /** 缓存键 = 类身份 + 候选字段名序列；顺序敏感，与 Arrays.asList 语义一致。 */
+    private static final class FieldKey {
+        final Class<?> clazz;
+        final String[] names;
+
+        FieldKey(Class<?> clazz, String[] names) {
+            this.clazz = clazz;
+            this.names = names == null ? null : names.clone();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof FieldKey)) {
+                return false;
+            }
+            FieldKey other = (FieldKey) o;
+            return clazz == other.clazz && Arrays.equals(names, other.names);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = System.identityHashCode(clazz);
+            // null 名字数组与空数组必须落在不同桶。
+            return 31 * result + (names == null ? 0 : 1 + Arrays.hashCode(names));
+        }
+    }
+
+    /** 改前 findMethod 的扫描逻辑，逐字保留，仅缓存未命中时执行一次。 */
+    private static Method lookupMethod(Class<?> clazz, String name, Class<?>[] paramTypes) {
+        Class<?> c = clazz;
+        while (c != null && c != Object.class) {
+            for (Method m : c.getDeclaredMethods()) {
+                if (!m.getName().equals(name)) {
+                    continue;
+                }
+                if (paramTypes == null || sameTypes(m.getParameterTypes(), paramTypes)) {
+                    m.setAccessible(true);
+                    return m;
+                }
+            }
+            c = c.getSuperclass();
+        }
+        return null;
+    }
+
+    /** 改前 findField 的扫描逻辑，逐字保留，仅缓存未命中时执行一次。 */
+    private static Field lookupField(Class<?> clazz, String[] names) {
+        List<String> wanted = Arrays.asList(names);
+        Class<?> c = clazz;
+        while (c != null && c != Object.class) {
+            for (Field f : c.getDeclaredFields()) {
+                if (wanted.contains(f.getName())) {
+                    f.setAccessible(true);
+                    return f;
+                }
+            }
+            c = c.getSuperclass();
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ 类
@@ -56,20 +166,12 @@ public final class Reflect {
         if (clazz == null || name == null) {
             return null;
         }
-        Class<?> c = clazz;
-        while (c != null && c != Object.class) {
-            for (Method m : c.getDeclaredMethods()) {
-                if (!m.getName().equals(name)) {
-                    continue;
-                }
-                if (paramTypes == null || sameTypes(m.getParameterTypes(), paramTypes)) {
-                    m.setAccessible(true);
-                    return m;
-                }
-            }
-            c = c.getSuperclass();
-        }
-        return null;
+        MethodKey key = new MethodKey(clazz, name, paramTypes);
+        Object hit = METHOD_CACHE.computeIfAbsent(key, k -> {
+            Method found = lookupMethod(clazz, name, paramTypes);
+            return found == null ? NOT_FOUND : found;
+        });
+        return hit == NOT_FOUND ? null : (Method) hit;
     }
 
     /**
@@ -167,18 +269,12 @@ public final class Reflect {
         if (clazz == null) {
             return null;
         }
-        List<String> wanted = Arrays.asList(names);
-        Class<?> c = clazz;
-        while (c != null && c != Object.class) {
-            for (Field f : c.getDeclaredFields()) {
-                if (wanted.contains(f.getName())) {
-                    f.setAccessible(true);
-                    return f;
-                }
-            }
-            c = c.getSuperclass();
-        }
-        return null;
+        FieldKey key = new FieldKey(clazz, names);
+        Object hit = FIELD_CACHE.computeIfAbsent(key, k -> {
+            Field found = lookupField(clazz, names);
+            return found == null ? NOT_FOUND : found;
+        });
+        return hit == NOT_FOUND ? null : (Field) hit;
     }
 
     /** 收集类层级上所有字段名，用于日志里做「到底有哪几个字段」的排查。 */

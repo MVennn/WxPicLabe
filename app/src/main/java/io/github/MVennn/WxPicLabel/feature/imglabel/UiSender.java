@@ -275,11 +275,31 @@ public final class UiSender {
 
     /** 当前界面是否存在可见的聊天输入框（自测轮询用，不发任何东西）。 */
     public static boolean hasInput() {
-        Activity act = currentActivity();
-        if (act == null || act.getWindow() == null) {
+        Activity top = currentActivity();
+        Activity act = cachedAct.get();
+        View root = cachedRoot.get();
+        EditText et = cachedEt.get();
+        // 缓存快路径：判据与 step() 的 fast path 同源，命中就 O(1) 返回，不走全树。
+        // !cachedLoose && act == top 只认前台聊天页；isChatInputFast 对齐 chatActivity() 的 MMEditText 判据，
+        // 别把相册/预览页的输入框误判成聊天输入框。
+        if (et != null && root != null && act != null
+                && !act.isFinishing()
+                && et.isAttachedToWindow() && root.isAttachedToWindow()
+                && !cachedLoose && act == top
+                && isChatInputFast(et)) {
+            et.getText();   // 轻量读取，确认缓存的 EditText 仍可用；不发任何东西
+            return true;
+        }
+        // 缓存失效：回退原全树查找，表达式与改前逐字相同（仅变量名 act→top）。
+        if (top == null || top.getWindow() == null) {
             return false;
         }
-        return findEditText(act.getWindow().getDecorView(), 0) != null;
+        return findEditText(top.getWindow().getDecorView(), 0) != null;
+    }
+
+    /** 聊天页输入框 O(1) 判据：与 chatActivity() 的 MMEditText 判据一致，避免缓存命中还遍历全树。 */
+    private static boolean isChatInputFast(EditText et) {
+        return et != null && et.getClass().getName().contains("MMEditText");
     }
 
     /**

@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.util.Log;
 
@@ -19,9 +20,12 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import io.github.MVennn.WxPicLabel.core.ConfigKeys;
 import io.github.MVennn.WxPicLabel.feature.imglabel.AlbumMemoryToggle;
@@ -65,6 +69,16 @@ public class WxPicLabelModule extends XposedModule {
     private static final String PROP = "debug.wxpiclabel.";
 
     private final Handler main = new Handler(Looper.getMainLooper());
+    /** 常驻轮询的后台线程：配置检查与记录回传不占主线程（发完图上滑掉帧的根因）。 */
+    private volatile HandlerThread pollThread;
+    private volatile Handler pollWorker;
+    /** android.os.SystemProperties#get(String) 的进程级缓存，省掉每轮两次 Class.forName + getMethod。 */
+    private static volatile Method propMethod;
+    /** isImage 按消息 Class 缓存命中的 getType() Method；空数组表示查过但没匹配。 */
+    private static final ConcurrentHashMap<Class<?>, Method[]> imageTypeMethods = new ConcurrentHashMap<>();
+    /** 兜底 flush 同一时刻最多挂一个；onPackageLoaded 重装时轮询只建一次。 */
+    private final AtomicBoolean flushPending = new AtomicBoolean(false);
+    private final AtomicBoolean pollerStarted = new AtomicBoolean(false);
     /** 是否主进程（见 onModuleLoaded）。 */
     private volatile boolean mainProcess;
 
@@ -909,27 +923,69 @@ public class WxPicLabelModule extends XposedModule {
 
     /** 轮询：接管没在跑、聊天页可用、而且还有没发出去的文件名，就按间隔补发。 */
     private void startFallbackPoller() {
-        if (!mainProcess) {
+        // onPackageLoaded 可能随 ClassLoader 重装被回调多次；轮询线程与首延迟只建一次。
+        if (!mainProcess || !pollerStarted.compareAndSet(false, true)) {
             return;
         }
+        // 常驻轮询挪到独立 HandlerThread：配置检查、重试、cfgPrefs 重附着、
+        // 记录回传的分片 commit 都不再抢主线程，避免发完图上滑 / 使用微信时掉帧。
+        HandlerThread thread = new HandlerThread("wxpiclabel-poller");
+        thread.start();
+        pollThread = thread;
+        final Handler worker = new Handler(thread.getLooper());
+        pollWorker = worker;
         Runnable poll = new Runnable() {
             @Override
             public void run() {
                 try {
-                    flushFallback();
-                    checkScopeRefresh();
-                    checkRecordReset();
-                    checkRecordEdits();
-                    checkRecordDump();
-                    retryRecordsPush();
-                    checkSelfTest();
+                    // flushFallback 要读 DecorView（UiSender.hasInput / send），必须回主线程；
+                    // 有兜底队列时才 post，CAS 保证同一时刻最多挂一个 flush（不重发），
+                    // 有界 latch 等它跑完，保持「先 flush 再 6 check」的顺序。
+                    if (pendingDrafts != null && flushPending.compareAndSet(false, true)) {
+                        final CountDownLatch flushDone = new CountDownLatch(1);
+                        final AtomicReference<Throwable> flushError = new AtomicReference<>();
+                        main.post(() -> {
+                            try {
+                                flushFallback();
+                            } catch (Throwable t) {
+                                flushError.set(t);   // 搬回 worker，别让异常冒到微信主线程
+                            } finally {
+                                flushDone.countDown();
+                                flushPending.set(false);
+                            }
+                        });
+                        try {
+                            flushDone.await(1500L, TimeUnit.MILLISECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        Throwable err = flushError.get();
+                        if (err != null) {
+                            // 与改前一致：flush 抛错就跳过本轮 6 个 check、记一条日志后自续。
+                            log("fallback: flush failed: " + err);
+                        } else {
+                            runChecks();
+                        }
+                    } else {
+                        runChecks();
+                    }
                 } catch (Throwable t) {
                     log("fallback: flush failed: " + t);
                 }
-                main.postDelayed(this, 700L);
+                worker.postDelayed(this, 700L);
             }
         };
-        main.postDelayed(poll, 1200L);
+        worker.postDelayed(poll, 1200L);
+    }
+
+    /** 6 个配置/记录检查，顺序与改前 :919-925 逐字一致；始终在 worker 上跑。 */
+    private void runChecks() {
+        checkScopeRefresh();
+        checkRecordReset();
+        checkRecordEdits();
+        checkRecordDump();
+        retryRecordsPush();
+        checkSelfTest();
     }
 
     // ------------------------------------------------------------------ 自测通道
@@ -1148,8 +1204,21 @@ public class WxPicLabelModule extends XposedModule {
      *
      * <p>**加锁**：批末推送、令牌推送、轮询里的重试可能同时进来，而回传是分片 insert，
      * 两路交错写会让 provider 把两个快照的片拼成一份烂 JSON。
+     *
+     * <p>统一 hop 到轮询后台线程执行：接管线程（batch）、主线程（fallback）、
+     * 轮询线程（token/reset/edits）三处的调用都归到同一条线程，分片 insert 与
+     * 同步 commit 不再占主线程，也不跨线程抢同一把锁。
      */
-    private synchronized void pushRecords(String why) {
+    private void pushRecords(String why) {
+        Handler w = pollWorker;
+        if (w != null && Looper.myLooper() != w.getLooper()) {
+            w.post(() -> doPushRecords(why));
+            return;
+        }
+        doPushRecords(why);
+    }
+
+    private synchronized void doPushRecords(String why) {
         if (!mainProcess) {
             return;
         }
@@ -1193,7 +1262,7 @@ public class WxPicLabelModule extends XposedModule {
         if (System.currentTimeMillis() < recordsRetryAt) {
             return;
         }
-        pushRecords("retry");
+        doPushRecords("retry");
     }
 
     /** 设置页点了「刷新记录」就把令牌换一个新值，这里比对后回传一次。 */
@@ -1532,13 +1601,27 @@ public class WxPicLabelModule extends XposedModule {
             return false;
         }
         try {
-            for (Method m : msg.getClass().getDeclaredMethods()) {
-                if ("getType".equals(m.getName()) && m.getParameterCount() == 0) {
-                    m.setAccessible(true);
-                    Object v = m.invoke(msg);
-                    return v instanceof Integer && (Integer) v == 3;
+            Class<?> cls = msg.getClass();
+            Method[] candidates = imageTypeMethods.get(cls);
+            if (candidates == null) {
+                Method[] found = new Method[0];
+                for (Method m : cls.getDeclaredMethods()) {
+                    if ("getType".equals(m.getName()) && m.getParameterCount() == 0) {
+                        m.setAccessible(true);
+                        found = new Method[]{m};
+                        break;
+                    }
+                }
+                candidates = imageTypeMethods.putIfAbsent(cls, found);
+                if (candidates == null) {
+                    candidates = found;
                 }
             }
+            if (candidates.length == 0) {
+                return false;
+            }
+            Object v = candidates[0].invoke(msg);
+            return v instanceof Integer && (Integer) v == 3;
         } catch (Throwable ignored) {
             // 判不出来就当不是
         }
@@ -1630,8 +1713,12 @@ public class WxPicLabelModule extends XposedModule {
 
     private static String prop(String name) {
         try {
-            Class<?> sp = Class.forName("android.os.SystemProperties");
-            Method get = sp.getMethod("get", String.class);
+            Method get = propMethod;
+            if (get == null) {
+                Class<?> sp = Class.forName("android.os.SystemProperties");
+                get = sp.getMethod("get", String.class);
+                propMethod = get;
+            }
             Object v = get.invoke(null, PROP + name);
             return v instanceof String ? (String) v : null;
         } catch (Throwable t) {

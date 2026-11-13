@@ -510,3 +510,52 @@
 - `python tools\check-docs.py`、`python tools\check-secrets.py` 各 exit 0
 
 **提交**：`7382b24`
+
+## 2026-11-13 · 主线程卡顿优化：轮询 / 回传 / 反射 / 相册监听（已验收，待提交）
+
+> **一句话**：把压在微信主线程的常驻 700ms 轮询、台账回传、反射查找与相册每帧字符串分配搬走，行为等价证明先落盘，改完两次 release 构建全绿。
+
+**需求（用户）**：「进行相关问题的优化」——承接只读诊断结论「发完图片上滑 / 使用微信会卡，且功能总开关出厂默认关闭也卡」。
+
+**行为等价证明**：`.work/perf-opt-lead.md` §2 的 E1–E16 矩阵先落盘再动源码；关键不变式 = 1200L 首延迟 / 700L 自续节拍不变、`flushFallback()` 仍读主线程 DecorView、6 个 `check*` 顺序逐字不变、`pushRecords` 仍 synchronized、`recordsDirty` 退避 `Math.min(60_000L, 5_000L * (1L + recordsFailures))` 不变、不新增 `featureEnabled()` 闸门（清空记录 / 编辑 / 刷新令牌 / 自测通道须在功能关时仍可用）、`CFG_TTL_MS = 3000L` 不动、`FriendBridgeProvider.kt:110/:129` 跨进程 `.commit()` 保留。
+
+**改动（7 个文件 / 321 insertions / 68 deletions）**
+- `app/src/main/java/io/github/MVennn/WxPicLabel/WxPicLabelModule.java`（106/19）：`startFallbackPoller()` 改跑 `HandlerThread("wxpiclabel-poller")` + `pollerStarted.compareAndSet(false, true)`；有 `pendingDrafts` 才 `main.post` 回主线程并用 `AtomicBoolean flushPending` CAS + `AtomicReference<Throwable> flushError` + `CountDownLatch.await(1500L, TimeUnit.MILLISECONDS)` 有界合并，异常搬回 worker 记 `log("fallback: flush failed: " + err)` 后自续；`runChecks()` 保持 6 个 check 顺序；`pushRecords` 拆 hop 包装 + `synchronized doPushRecords`，`retryRecordsPush()` 直接 `doPushRecords("retry")`；`isImage` 按 `ConcurrentHashMap<Class<?>, Method[]>` 缓存（空数组=查过无 `getType`），`prop()` 缓存 `SystemProperties.get(String)` 的 Method。
+- `feature/imglabel/RepeatCounter.java`（9/9）：本地台账 9 处 `.commit()` → `.apply()`（:103/:227/:336/:350/:424/:452/:546/:561/:623），`public synchronized` 与锁范围不变。
+- `util/Reflect.java`（122/26）：`findMethod` / `findField` 加 `ConcurrentHashMap<Key,Object>` 进程级缓存 + `NOT_FOUND` 查无哨兵；`lookupMethod` / `lookupField` 改前继承链全扫逐字保留，public 签名零改动。
+- `feature/imglabel/AlbumMemoryToggle.java`（53/11）：fresh 注入只挂 **一个常驻** `OnGlobalLayoutListener`、existing 绝不重复 add；回调每次全局布局按改前公式 `dx = (bar.getWidth() - (w1 + gap + w2)) / 2f - srcRow.getLeft()` 重算并 `setTranslationX`（勾「原图」后底栏变高语义完整保留）；`kids` 遍历 / `StringBuilder` / `Log.i` 全收进 `debug.wxpiclabel.uidump` 开关，`uidumpGet` 双参 Method 用 volatile 缓存，`invalidateSelf()` 原样保留。
+- `feature/imglabel/UiSender.java`（23/3）：`hasInput()` 走 `cachedAct/cachedRoot/cachedEt` WeakReference 快路径（`!cachedLoose && act == top && isChatInputFast(et)`），失效回退表达式与改前逐字等价，不读写 `LOOSE`。
+- `CHANGELOG.md`（2/0）与 `docs/PITFALLS.md`（6/0）：门面双记账，「现象 → 根因 → 怎么避」落 §29。
+
+**集成复核中修掉的两处不等价**
+1. 证明 E2/E4 声明 `AtomicBoolean flushPending CAS`，首版实现只有 `CountDownLatch` 且 `main.post` lambda 无 catch → 补 3 处 edit（imports / 两字段 / `startFallbackPoller` 全文 + `runChecks()`），避免重复 `flushFallback()` 破坏「同一 draft 只发一次」，异常不再冒到微信主线程。
+2. opt-ui 首版「算完一次 dx 就 `removeOnGlobalLayoutListener`」与 `WxPicLabelModule.java:828-847` 的调用链不符（`inject()` 在相册生命周期只跑 1~6 次、都在打开后约 2.3s 内）→ 退回后收敛为常驻唯一监听 + 每次布局重算 dx + 默认零分配。
+
+**验收**
+- 三路子代理 `opt-io` / `opt-ui` / `opt-reflect` 全 inactive；self-report 未当结论，主线用 `glob` + `read` 行数/字节 + 逐字复现源码锚点 + `git status` 验收。四份分片报告 + `.work/perf-opt-full.diff`（634 行 / 32729 B）。
+- 静态复核：`main.postDelayed(this, 700L)` 0 / `worker.postDelayed(this, 700L)` 1（:975）/ `postDelayed(poll, 1200L)` 1（:978）；`RepeatCounter.java` `commit` 0 / `apply` 9；`FriendBridgeProvider.kt:110/:129` 仍 `commit()`；`AlbumMemoryToggle.java` `removeOnGlobalLayoutListener` 0 / `addOnGlobalLayoutListener` 1（:191）/ `invalidateSelf();` 1（:456）。
+- `git -C WxPicLabe diff --check` → `EXIT=0`；`python tools\check-docs.py` → `EXIT=0`「扫描 20 篇文档, 索引完整, 无断链, 无孤儿」；`python tools\check-secrets.py` → `EXIT=0`「扫描 127 个文件, 命中 0 处」。
+- `build.cmd` 默认 release 两次实跑：`BUILD SUCCESSFUL in 1m 10s`（48 tasks: 31 executed / 15 from cache / 2 up-to-date）、增量 `BUILD SUCCESSFUL in 47s`（48 tasks: 10 executed / 38 up-to-date），`BUILD_EXIT=0`；`app/build/outputs/apk/release/app-release.apk` 两次均 `1435544 B`（1.37 MB）。完整日志 `.work/perf-opt-build.log`。
+- `util/Reflect.java` 分片单跑 `javac --release 17` `JAVAC_EXIT=0`、纯 JDK 行为探针 `pass=27 fail=0`、8 线程×1000 次 `errors=0`。
+- 构建告警（非本轮引入）：`WARNING: R8: An error occurred when parsing kotlin metadata`（Kotlin 新于该 R8）、`AlbumMemoryToggle.java 使用或覆盖了已过时的 API`。
+- 真机帧耗时 `[待补: 真机帧耗时实测]`：验收命令 `adb shell dumpsys gfxinfo com.tencent.mm framestats` 与 `StrictMode.setThreadPolicy(new ThreadPolicy.Builder().detectDiskWrites().detectDiskReads().penaltyLog().build())`。
+
+**收尾**：本轮零 git 写操作；两批共 12 个 `.dshclaim` 孤儿占位全部清理（含本次收尾 claim 因 `release_files` 会话身份漂移残留的 2 个），12:34 复核 `claim_status`「当前没有登记的会话」、全仓 `*.dshclaim` 零残留；`PROGRESS.md` 自身 `33/0` 进 diff，最终 8 个 `M` / 354 insertions / 68 deletions。
+
+## 2026-11-13 · 发版 0.8.2：收尾并发布 release（已验收，随本轮提交）
+
+> **一句话**：把上一轮「主线程卡顿优化」与 0.8.2 版本号一起收口，按「收尾」六步走完自审 → 查遗漏 → 找更好写法 → push → 清垃圾 → 沉淀记忆。
+
+**需求（用户）**：「收尾并发布release」——push 仅由「收尾」口令授权，含推后确认 CI 绿；清垃圾=微扫档。
+
+**版本口径（三路独立复核一致）**：`versionCode 12` / `versionName "0.8.2"` / tag `12-0.8.2` / Release 标题 `v0.8.2` / 资产 `WxPicLabel_12-0.8.2.apk` / CHANGELOG 段 `## [0.8.2] - 2026-11-13`。依据 `docs/VERSIONING.md:9`（PATCH=修缺陷/内部重构）、`:20`、`:32`；实仓 9 个 tag 全为 `{versionCode}-{versionName}` 无 `v` 前缀。`README.md:11` 是动态徽章、docs 与 ISSUE_TEMPLATE 零写死版本号需改。
+
+**三路只读分片（self-report 未当结论，主线 glob + read + 独立复现验收）**：`.work/release-version.md` 243 行（版本口径与历史 tag）、`.work/release-ci.md` 157 行（remote 只有 origin、`ci.yml:6-8` 只有 pull_request / workflow_dispatch，push 与 tag 都跑 0 job，必须手动 `gh workflow run`）、`.work/release-clean.md` 256 行（微扫档：5 个空/重复 `.work` 边车清理、11 个 `perf-*` 与 4 个 APK 全保留）。
+
+**本地验收（已实测）**：`build.cmd` 默认 release 重编 `BUILD SUCCESSFUL in 1m 10s`、`48 actionable tasks: 18 executed, 30 up-to-date`、`BUILD_EXIT=0`；APK `1435544 B`，`aapt2 dump badging` 回读 `versionCode='12' versionName='0.8.2'`；`tools\check-docs.py` → `EXIT=0`「扫描 20 篇文档, 索引完整, 无断链, 无孤儿」；`tools\check-secrets.py` → `EXIT=0`「扫描 130 个文件, 命中 0 处」；`git diff --check` → `EXIT=0`。Release 正文 `.work/release-body-0.8.2.md` 25 行 / 2558 B 按三段结构（加粗一句话 / Issues 入口 / `## 本版内容`）落盘。
+
+**远端动作**：本轮由「收尾」口令授权执行 `git push origin main` + `git push origin 12-0.8.2` + `gh release create 12-0.8.2 --title "v0.8.2" --notes-file .work/release-body-0.8.2.md --verify-tag`，再手动 `gh workflow run ci.yml --ref main` 并 `gh run watch --exit-status` 确认 gates / build 两 job 绿；实测结果以最终答复与远端 Release/CI 页面为准。
+
+**收尾**：全仓 `*.dshclaim` 孤儿占位按 JSON tag 核归属后清零（本会话 + 三路已结束分片），`claim_status`「当前没有登记的会话」；`.work/` 报告 / diff / 日志 / bak / APK 全部保留，`.gitignore:38` 覆盖不入库；真机帧耗时 `[待补: 真机帧耗时实测]`。
+
+[[TASK_ALL_DONE]]

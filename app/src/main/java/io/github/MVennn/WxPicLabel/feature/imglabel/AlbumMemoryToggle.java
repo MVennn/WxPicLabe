@@ -126,6 +126,7 @@ public final class AlbumMemoryToggle {
             }
             View root = act.getWindow().getDecorView();
             dumpIfRequested(root);
+            uidumpOn = uidumpEnabled();   // 调试开关只在 inject() 读一次；listener 热路径零反射
 
             View existing = findTagged(root);
             View srcText = findTextMatch(root, new String[]{"原图", "Full Image"});
@@ -142,7 +143,8 @@ public final class AlbumMemoryToggle {
             ViewGroup bar = (ViewGroup) srcRow.getParent();
 
             View mine = existing;
-            if (mine == null) {
+            boolean fresh = (mine == null);
+            if (fresh) {
                 if (!show) {
                     return null;   // 该会话不显示：什么都不注入
                 }
@@ -159,7 +161,10 @@ public final class AlbumMemoryToggle {
                 srcRow.setTranslationX(0f);
                 return null;
             }
-            applyOffset(srcRow, mine, act);
+            if (fresh) {
+                applyOffset(srcRow, mine, act);   // 首次注入：挂唯一常驻监听，之后每次全局布局重算 dx
+            }
+            // existing：这行是之前 fresh 注入的，已带唯一常驻监听；本轮只更新显隐/配置，绝不重复 add。
             return null;
         } catch (Throwable t) {
             return "album: inject failed: " + t;
@@ -194,18 +199,55 @@ public final class AlbumMemoryToggle {
                 float dx = (bar.getWidth() - (w1 + gap + w2)) / 2f - srcRow.getLeft();
                 srcRow.setTranslationX(dx);
                 mine.setTranslationX(dx);
-                StringBuilder kids = new StringBuilder();
-                for (int i = 0; i < bar.getChildCount(); i++) {
-                    View k = bar.getChildAt(i);
-                    kids.append(' ').append(k.getClass().getSimpleName())
-                            .append('/').append(k.getVisibility())
-                            .append('/').append(box(k));
+                if (uidumpOn) {
+                    logGeom(bar, srcRow, mine, dx);
                 }
-                android.util.Log.i("WxPicLabel", "filename toggle: geom bar=" + h(bar)
-                        + " src=" + box(srcRow) + " mine=" + box(mine) + " dx=" + (int) dx
-                        + " kids:" + kids);
             }
         });
+    }
+
+
+    /** debug.wxpiclabel.uidump 的反射 Method 只查一次，别每次布局反射。 */
+    private static volatile Method uidumpGet;
+    private static volatile boolean uidumpGetTried;
+    /** 调试日志开关：只在 inject() 采样一次；listener 热路径默认零反射、零分配。 */
+    private static volatile boolean uidumpOn;
+
+    /** 复用 dumpIfRequested 的同款 prop 读法：默认关，不读进来就不拼字符串。 */
+    private static boolean uidumpEnabled() {
+        try {
+            Method get = uidumpGet;
+            if (get == null && !uidumpGetTried) {
+                uidumpGetTried = true;
+                Class<?> sp = Class.forName("android.os.SystemProperties");
+                get = sp.getMethod("get", String.class, String.class);
+                uidumpGet = get;
+            }
+            if (get == null) {
+                return false;
+            }
+            Object v = get.invoke(null, "debug.wxpiclabel.uidump", "");
+            return v instanceof String && "1".equals(((String) v).trim());
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 原 :197-206 的 kids 遍历 + Log.i，整体收进 uidump 开关；默认零字符串分配。 */
+    private static void logGeom(ViewGroup bar, View srcRow, View mine, float dx) {
+        if (!uidumpEnabled()) {
+            return;
+        }
+        StringBuilder kids = new StringBuilder();
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            View k = bar.getChildAt(i);
+            kids.append(' ').append(k.getClass().getSimpleName())
+                    .append('/').append(k.getVisibility())
+                    .append('/').append(box(k));
+        }
+        android.util.Log.i("WxPicLabel", "filename toggle: geom bar=" + h(bar)
+                + " src=" + box(srcRow) + " mine=" + box(mine) + " dx=" + (int) dx
+                + " kids:" + kids);
     }
 
     private static String h(View v) {
