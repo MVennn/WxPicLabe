@@ -18,14 +18,15 @@
 | 东西 | 写法 | 例子 |
 | --- | --- | --- |
 | tag | `{versionCode}-{versionName}` | `4-0.4.0` |
-| Release 标题 | `v{versionName}`；版本自带定位时接一句：`v{versionName} · <一句定位>` | `v0.4.0` / `v1.0.0 · 功能重构升级` |
+| Release 标题 | `v{versionName}`，**只有版本号，一个字都不多写** | `v0.4.0` / `v1.0.0` |
 | 资产名 | `WxPicLabel_{versionCode}-{versionName}.apk` | `WxPicLabel_4-0.4.0.apk` |
 
 标题里塞**功能清单**（`v0.4.0 · 新增某某 / 修复某某`）是**错的**：版本列表靠 tag 与标题对齐，
 标题一长，列表里每一行都不一样长，且描述与正文第一行重复。
 
-允许的是**一句版本定位**（1.0.0 起）：只在「这一版是什么性质」一句话说得清时写，
-例如 `v1.0.0 · 功能重构升级`；说不清性质就不写，回到纯 `v{versionName}`。
+**「一句版本定位」同样不行**（2026-11-14 订正）：`v1.0.0 · 功能重构升级` 这种也收回去。
+这一版是什么性质，写在 Release **正文第一行的加粗一句话**里；标题永远只有 `v{versionName}`。
+1.0.0 当时按当轮口述临时放开了这条，两个仓库的标题都已改回 `v1.0.0`。
 
 ## 2. 版本号只在这里
 
@@ -44,3 +45,21 @@
   2. 第二行：固定反馈入口（Issues 链接 + 要带什么）；
   3. `## 本版内容` 正文：按分区（发送 / 发送设置 / 界面 / 文档）分组，
      每条以「新增 / 调整 / 修复 / 优化 / 移除」开头，写全称动词。
+
+## 4. 发版要发两个仓库
+
+| 仓库 | 谁在用 | 怎么发 |
+| --- | --- | --- |
+| `MVennn/WxPicLabe`（源码） | 源码、Issue、下载入口 | `gh release create` |
+| `Xposed-Modules-Repo/io.github.MVennn.WxPicLabel`（模块仓库） | **LSPosed 网站与 App 只读这里** | `python tools/publish_lsposed.py` |
+
+两个仓库**互不同步**：只发源码仓库，modules.lsposed.org 与 LSPosed App 一个字都收不到。
+两边必须**同 tag**（`{versionCode}-{versionName}`）、**同产物**（`WxPicLabel_{tag}.apk`）、
+**同 Release 说明**，模块仓库的 `README.md` 与源码仓库逐字一致。
+
+模块仓库的元文件（`README.md` / `SUMMARY` / `SOURCE_URL` / `icon.svg`）母本都在本仓，
+见 `xposed-repo/README.md`；`tools/publish_lsposed.py` 一次同步过去。
+
+**模块仓库的 Description 只能浏览器改**（About 齿轮）：`PATCH /repos/{owner}/{repo}` 要
+Admin，我们只有 maintain，接口 404。描述为空 ⇒ 模块不出现在 modules.lsposed.org。
+1.0.0 首次收录时填的是 `WxPicLabe - 微信发图功能扩展`。
