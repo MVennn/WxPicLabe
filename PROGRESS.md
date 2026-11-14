@@ -582,4 +582,6 @@
 - **同一份源码两次构建体积完全相同（1,485,004 B）但 sha256 不同**：`build.cmd` 先跑 `:app:assembleRelease` 再跑传入的任务，跑单测那一轮把 APK 重打了一遍，`BuildConfig.BUILD_TIME`（配置期算的 `yyyy-MM-dd HH:mm`，字符串等长）变了 → 字节变。以**最后一次**构建产物为准，见 `docs/PITFALLS.md` §22/§26
 - 最终 sha256 `40556708392E79D9F5954F9DB1E1D38D53E8FFDB6E2907806044589CDCA0FBAF`（构建 job `completed` 且 `LastWriteTime` 稳定后才算），`dist/WxPicLabel_13-1.0.0.apk` 副本同值
 
+**远端动作（已执行）**：`git tag 13-1.0.0` → `git push origin main`（`f238867..2b66718`）→ `git push origin 13-1.0.0` → `gh release create 13-1.0.0 --title "v1.0.0 · 功能重构升级" --notes-file .work/release-body-1.0.0.md --verify-tag dist/WxPicLabel_13-1.0.0.apk`，两处 push `EXIT=0`、`REL_EXIT=0`。GitHub 侧资产 digest `sha256:40556708392e79d9f5954f9db1e1d38d53e8ffdb6e2907806044589cdca0fbaf`、`size=1485004`，与本地 `Get-FileHash` 逐字节一致（以 GitHub digest 为准回写）。Release：<https://github.com/MVennn/WxPicLabe/releases/tag/13-1.0.0>
+
 [[TASK_ALL_DONE]]
