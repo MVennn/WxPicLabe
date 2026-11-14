@@ -11,7 +11,7 @@
 - 修复 用户随手填的通配规则能卡死微信进程：`TextFilter` 把通配编译成正则再 `matches()`，`*a*a*a*a*b` 这种形状在几十个字符上就指数回溯。现在改成双指针 + 回溯点匹配（最坏 O(长度 × 星号数)，无正则回溯），文本侧大小写折叠每段只做一次；`TextFilterTest` 加两条回归（顺序语义 + 病态模式 2 秒上限）
 - 新增 跨进程回传协议收口到 `core/BridgeProtocol.kt` 单一常量源，并加只读探针 `/status`（schema / 模块版本 / features / 两条回传的时间与规模共八列）；records 与 friends 载荷统一带 `v` 与 `at`，读侧 `v > SCHEMA` 走 lenient 解析并标 `unsupported` 而不是猜结构。好友回传补上退避重试（与记录回传同口径 `min(60s, 5s × (1 + 失败次数))`），分片 `insert` 返回 null 就整份放弃；Provider 加 `MAX_CHUNKS` / `MAX_CHUNK_CHARS` 闸门，末片改按前缀清扫残留分片（原来只清 `0..total-1`，上一批更长时高位分片永久残留）
 - 优化 发送记录页从 `verticalScroll + 双层 for` 换成 `LazyColumn` 扁平行：600 条台账原来首帧就把每一行都组合、测量一遍（每行还各挂一个 `remember` 锚点 + `onGloballyPositioned`），现在只组合可见的十几行，展开一组的开销与总行数无关；`openKeys` / 扁平行表 / 时间下界都进 `remember`，滚动引起的重组不再重算这些。组卡横跨多个 item，按「首段圆上两角 / 中段直边 / 末段圆下两角」逐段自绘，圆角与底色仍取 `CardDefaults.CornerRadius` / `defaultColors()`（`insideMargin` 实测为 0dp，所以切片与整卡逐像素一致）
-- 优化 UI 帧路径减分配：概览卡光场每帧的两次 `map` + `listOf` + `forEachIndexed` 换成局部 `val` 与直调（每帧少 8–10 个短命对象），卡片滚出屏幕或窗口不在 `STARTED` 时不再累加时间、不触发重绘；概览卡的横滑让位跟着走同一判据
+- 优化 UI 帧路径减分配：概览卡光场每帧的两次 `map` + `listOf` + `forEachIndexed` 换成局部 `val` 与直调（每帧少 8–10 个短命对象），卡片滚出屏幕或窗口不在 `STARTED` 时不再累加时间、不触发重绘
 - 修复 日志导出的 `StringBuilder` 并发写：读线程拼一段、调用线程 `toString()`，读线程 `join(1000)` 超时后仍在 append，导出内容可能被截断。现在读写都在同一个锁里
 
 ## [0.8.2] - 2026-11-13
