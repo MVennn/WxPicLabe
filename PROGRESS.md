@@ -2,6 +2,33 @@
 
 > **一句话**：本仓任务与验收记录，按批次追加。
 
+## 2026-11-14 · 1.0.0 发布到 LSPosed 模块仓库 + Release 标题口径收回
+
+**需求（用户）**：「发布到lsposed仓库」；随后订正「版本号不要带文字」。
+
+**根因**：1.0.0 标题写成 `v1.0.0 · 功能重构升级`，来自当轮口述「主标题提一下这次更新为功能重构升级」——
+我据此把 `docs/VERSIONING.md` §1.1 改成允许「一句版本定位」，而 2026-11-06 批次已经记过「标题只写 v{versionName}」。
+规则已收回，不是记忆或提示词导致的。
+
+**改动**
+- 新增 `tools/publish_lsposed.py`：`--check` / `--sync-only` / `--dry-run` / 默认 = 建或更新模块仓 Release + 同步四个元文件
+- 新增 `xposed-repo/SUMMARY`（模块页一句话简介母本）、`xposed-repo/README.md`（元文件母本表）
+- `docs/VERSIONING.md` §1.1 收回「一句版本定位」，改为硬性「只写 v{versionName}」；新增 §4「发版要发两个仓库」
+
+**远端动作**
+- `Xposed-Modules-Repo/submission` issue #2593 `[submission] io.github.MVennn.WxPicLabel` → XposedBot 建仓 `Xposed-Modules-Repo/io.github.MVennn.WxPicLabel`（id 1457739853）并发 maintain 邀请 → `PATCH /user/repository_invitations/343642377` 接受（push=true、admin=false）
+- 模块仓 initial commit `a06af66`（README.md / SUMMARY / SOURCE_URL / icon.svg）
+- 模块仓 Release `13-1.0.0`：标题先写 `v1.0.0 · 功能重构升级`，已 `gh release edit` 改回 `v1.0.0`；资产 `WxPicLabel_13-1.0.0.apk` 1,485,004 B，digest `sha256:40556708392e79d9f5954f9db1e1d38d53e8ffdb6e2907806044589cdca0fbaf`（与源码仓逐字节一致）
+- 源码仓 Release `13-1.0.0` 标题同样改回 `v1.0.0`
+- 未完成（只能浏览器）：模块仓 Description 为空 ⇒ 模块不出现在 modules.lsposed.org；`PATCH /repos/...` 404、GraphQL `updateRepository` FORBIDDEN，About 齿轮是唯一入口
+
+**验证**
+- `python tools/publish_lsposed.py --check` exit 0：两仓 push 权限均在，并提示描述为空
+- `--sync-only` 补推了 `SOURCE_URL`（母本带尾换行）；`--dry-run` 打印「更新 Release 13-1.0.0」+ 四文件同步
+- `gh release view 13-1.0.0 --repo Xposed-Modules-Repo/io.github.MVennn.WxPicLabel` → `name=v1.0.0`、`tagName=13-1.0.0`
+- 模块仓 Tag 工作流 run：`Xposed-Modules-Repo/io.github.MVennn.WxPicLabel@13-1.0.0` → `completed / success`
+
+
 ## 2026-11-11 · 0.8.0 追加次数设置：时段闸门 + 滚轮选时间（已发版）
 
 **需求（用户）**：` +N` 只累计在设定时段内发出的图 —— 时段外发的连号都不占，「今天三点半前发过、三点半后再发」也不能变 +2；时段选择要 iOS 闹钟那种上下滑动的滚轮，不要打字。
