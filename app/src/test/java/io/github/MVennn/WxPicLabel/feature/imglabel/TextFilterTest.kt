@@ -115,6 +115,34 @@ class TextFilterTest {
     }
 
     @Test
+    fun wildcardHonoursOrderAcrossTheStars() {
+        // 前一段必须真在文本里、后一段必须真在它后面：不能退化成「每个字母出现过就算命中」
+        val rules = TextFilter.parseRules("IMG_*.jpg", true)
+        assertNotNull(TextFilter.find(rules, "IMG_2024.jpg"))
+        assertNull(TextFilter.find(rules, "2024_IMG.jpg"))
+        assertNull(TextFilter.find(rules, "IMG_2024.jp"))
+
+        val loose = TextFilter.parseRules("img_*.JPG", true)
+        assertNotNull(TextFilter.find(loose, "IMG_2024.jpg"))
+        val strict = TextFilter.parseRules("img_*.JPG", false)
+        assertNull(TextFilter.find(strict, "IMG_2024.jpg"))
+    }
+
+    @Test
+    fun wildcardKeepsHandOnPathologicalPattern() {
+        // 老实现把通配编译成正则再 matches()，"*a*a*…*b" 这种形状在长串上指数回溯，
+        // 直接卡住微信进程（规则是用户填的，长度没人管）。现行实现走双指针 + 回溯点，
+        // 这里钉住两件事：结果是不命中，且耗时是线性级别。
+        val pattern = "*a".repeat(12) + "*b"
+        val rules = TextFilter.parseRules(pattern, true)
+        val text = "a".repeat(60)
+        val started = System.nanoTime()
+        assertNull(TextFilter.find(rules, text))
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000L
+        assertTrue("通配匹配退化成回溯了：耗时 " + elapsedMs + "ms", elapsedMs < 2_000L)
+    }
+
+    @Test
     fun emptyTextIsTreatedAsNoMatch() {
         val rules = TextFilter.parseRules("截图", true)
         assertNull(TextFilter.find(rules, ""))
