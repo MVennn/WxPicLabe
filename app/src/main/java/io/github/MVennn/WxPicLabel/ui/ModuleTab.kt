@@ -26,6 +26,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +35,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import io.github.MVennn.WxPicLabel.BuildConfig
 import io.github.MVennn.WxPicLabel.R
@@ -280,10 +284,31 @@ private fun OverviewStatusCard(
     // 动画时间：只在绘制阶段被读取（`fieldClock` 是个 lambda），推进靠
     // withFrameNanos 累加 —— 每帧只有这层光场重绘，概览页不会跟着重组。
     val fieldTime = remember { mutableFloatStateOf(0f) }
+    // 卡片不跟滚动，恒为全亮（关于页那个参数是给滚动淡出用的）
+    val alwaysVisible = remember { { 1f } }
+    // 这层光场每出一帧就要重建 5 个渐变 shader，所以「看不见」和「不在前台」
+    // 时不该继续累计时间：
+    //  - 卡片滚出顶部后整块被 Card 裁掉，画了也看不见（verticalScroll 只改平移，
+    //    boundsInWindow() 会跟着动，于是拿它的下沿当判据，不必自己再量一层视口）；
+    //  - 退到后台时 Recomposer 一般会自己停表，这里按生命周期再兜一道，
+    //    免得别的动画替 frame clock 续命时这层还在空转。判据用 STARTED 而不是
+    //    RESUMED：分屏 / 画中画里窗口可见但没拿到焦点（正是只到 STARTED），
+    //    那时光场还看得见，冻住就成了可见的变化。
+    // alwaysVisible 目前恒为 1f，这一项是给「以后接回滚动淡出」留的一致判据。
+    val cardOnScreen = remember { mutableStateOf(true) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(Unit) {
         var previous = 0L
         while (true) {
             withFrameNanos { frame ->
+                // 跳过的帧刻意不动 `previous`：恢复后第一次累加的 delta 会把整段
+                // 空档一次补上，光场相位与「从未停过」连续（回头不会跳一下）。
+                if (alwaysVisible() <= 0.001f ||
+                    !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) ||
+                    !cardOnScreen.value
+                ) {
+                    return@withFrameNanos
+                }
                 if (previous != 0L) {
                     fieldTime.floatValue += (frame - previous) / 1_000_000_000f
                 }
@@ -292,11 +317,12 @@ private fun OverviewStatusCard(
         }
     }
     val fieldClock = remember(fieldTime) { { fieldTime.floatValue } }
-    // 卡片不跟滚动，恒为全亮（关于页那个参数是给滚动淡出用的）
-    val alwaysVisible = remember { { 1f } }
 
     Card(
-        modifier = modifier,
+        // 光场的出帧判据挂在卡片根上：滚出顶部时通知动画别再累计（见上面 cardOnScreen）
+        modifier = modifier.onGloballyPositioned { coords ->
+            cardOnScreen.value = coords.boundsInWindow().bottom > 0f
+        },
         // 内边距改由文字列自己加：装饰图标要贴到卡片边缘，不能被 Card 的内边距挡住
         insideMargin = PaddingValues(0.dp),
         // 卡面底色就是页面底色：卡片的形由光场给出，不再垫一层状态色

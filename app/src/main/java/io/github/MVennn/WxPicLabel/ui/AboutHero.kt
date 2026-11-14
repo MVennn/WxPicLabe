@@ -348,21 +348,56 @@ internal fun DrawScope.drawAboutGradientField(
     sampleOrigin: Offset,
     blendMode: BlendMode = BlendMode.SrcOver,
 ) {
-    val strengthenedColors = colors.map(::strengthenGradientColor)
-    val translucentPalette = strengthenedColors.any { it.alpha < 0.8f }
+    // 逐帧只剩分配这一项还有余量（shader 要等 Brush 真正绘制时才创建，缓存 Brush
+    // 对象救不了它），于是四个强化色直接落进局部变量：Color 是 value class，落在
+    // 局部不装箱；而 colors.map { } 会把它连同结果搬进新的 ArrayList，再被
+    // .any { } 与第二次 .map { } 各遍历一遍。
+    // 固定取 0..3 是有意的：调用方传入的一律是「4 色一组」的调色板
+    // （LightGradientPalettes / DarkGradientPalettes / lightFieldPalettesFrom），
+    // 下面原本的光斑循环也同样按 0..3 取色。
+    val color0 = strengthenGradientColor(colors[0])
+    val color1 = strengthenGradientColor(colors[1])
+    val color2 = strengthenGradientColor(colors[2])
+    val color3 = strengthenGradientColor(colors[3])
+    // 与原来的 strengthenedColors.any { it.alpha < 0.8f } 等价：短路求值结果相同
+    val translucentPalette = color0.alpha < 0.8f ||
+        color1.alpha < 0.8f ||
+        color2.alpha < 0.8f ||
+        color3.alpha < 0.8f
     val radius = fieldSize.maxDimension * 0.62f
     val motionTime = animationTime * BackgroundSpeed
     drawRect(
         brush = Brush.linearGradient(
-            colors = strengthenedColors.map { color ->
-                color.copy(
+            colors = listOf(
+                color0.copy(
                     alpha = if (translucentPalette) {
-                        color.alpha * 0.72f
+                        color0.alpha * 0.72f
                     } else {
                         0.58f
                     },
-                )
-            },
+                ),
+                color1.copy(
+                    alpha = if (translucentPalette) {
+                        color1.alpha * 0.72f
+                    } else {
+                        0.58f
+                    },
+                ),
+                color2.copy(
+                    alpha = if (translucentPalette) {
+                        color2.alpha * 0.72f
+                    } else {
+                        0.58f
+                    },
+                ),
+                color3.copy(
+                    alpha = if (translucentPalette) {
+                        color3.alpha * 0.72f
+                    } else {
+                        0.58f
+                    },
+                ),
+            ),
             start = Offset(-sampleOrigin.x, -sampleOrigin.y),
             end = Offset(
                 fieldSize.width - sampleOrigin.x,
@@ -371,47 +406,64 @@ internal fun DrawScope.drawAboutGradientField(
         ),
         blendMode = blendMode,
     )
-    val centers = listOf(
-        Offset(
-            x = fieldSize.width * (0.18f + 0.10f * sin(motionTime)),
-            y = fieldSize.height * (0.20f + 0.08f * cos(motionTime * 0.8f)),
-        ),
-        Offset(
-            x = fieldSize.width * (0.82f + 0.10f * cos(motionTime * 0.9f)),
-            y = fieldSize.height * (0.78f + 0.10f * sin(motionTime * 0.7f)),
-        ),
-        Offset(
-            x = fieldSize.width * (0.22f + 0.12f * cos(motionTime * 0.65f)),
-            y = fieldSize.height * (0.80f + 0.08f * sin(motionTime * 0.85f)),
-        ),
-        Offset(
-            x = fieldSize.width * (0.80f + 0.12f * sin(motionTime * 0.72f)),
-            y = fieldSize.height * (0.20f + 0.08f * cos(motionTime * 0.62f)),
-        ),
-    )
-    centers.forEachIndexed { index, globalCenter ->
-        val color = strengthenedColors[index]
-        val localCenter = globalCenter - sampleOrigin
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    color.copy(
-                        alpha = if (translucentPalette) {
-                            color.alpha * 0.96f
-                        } else {
-                            0.88f
-                        },
-                    ),
-                    color.copy(alpha = 0f),
+    // 光斑中心沿用原来的算式（常量与上游一致），只是不再先塞进
+    // listOf(Offset, …) 再 forEachIndexed 取回来 —— 那一步每帧额外分配
+    // 一个列表、一个 vararg 数组和四个装箱的 Offset。
+    val localCenter0 = Offset(
+        x = fieldSize.width * (0.18f + 0.10f * sin(motionTime)),
+        y = fieldSize.height * (0.20f + 0.08f * cos(motionTime * 0.8f)),
+    ) - sampleOrigin
+    val localCenter1 = Offset(
+        x = fieldSize.width * (0.82f + 0.10f * cos(motionTime * 0.9f)),
+        y = fieldSize.height * (0.78f + 0.10f * sin(motionTime * 0.7f)),
+    ) - sampleOrigin
+    val localCenter2 = Offset(
+        x = fieldSize.width * (0.22f + 0.12f * cos(motionTime * 0.65f)),
+        y = fieldSize.height * (0.80f + 0.08f * sin(motionTime * 0.85f)),
+    ) - sampleOrigin
+    val localCenter3 = Offset(
+        x = fieldSize.width * (0.80f + 0.12f * sin(motionTime * 0.72f)),
+        y = fieldSize.height * (0.20f + 0.08f * cos(motionTime * 0.62f)),
+    ) - sampleOrigin
+    drawAboutGradientSpot(localCenter0, color0, radius, translucentPalette, blendMode)
+    drawAboutGradientSpot(localCenter1, color1, radius, translucentPalette, blendMode)
+    drawAboutGradientSpot(localCenter2, color2, radius, translucentPalette, blendMode)
+    drawAboutGradientSpot(localCenter3, color3, radius, translucentPalette, blendMode)
+}
+
+/**
+ * 画一颗光斑（[drawAboutGradientField] 的四次调用）。
+ *
+ * 抽成函数只为把「内圈着色 → 外圈透明」那段样板收敛到一处；参数按值传
+ * （Color / Offset 都是 value class），四个点各自直调，不走数组或循环分发 ——
+ * 那又会把中心点与颜色装箱回堆上，正是这次要消掉的开销。
+ */
+private fun DrawScope.drawAboutGradientSpot(
+    center: Offset,
+    color: Color,
+    radius: Float,
+    translucentPalette: Boolean,
+    blendMode: BlendMode,
+) {
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                color.copy(
+                    alpha = if (translucentPalette) {
+                        color.alpha * 0.96f
+                    } else {
+                        0.88f
+                    },
                 ),
-                center = localCenter,
-                radius = radius,
+                color.copy(alpha = 0f),
             ),
-            center = localCenter,
+            center = center,
             radius = radius,
-            blendMode = blendMode,
-        )
-    }
+        ),
+        center = center,
+        radius = radius,
+        blendMode = blendMode,
+    )
 }
 
 /** 饱和度 +18%、整体压暗 1.5%：深色下不会糊成一片灰，浅色下更透亮 */

@@ -73,7 +73,7 @@ internal fun MarkdownText(
                 is MdBlock.Heading -> HeadingBlock(block)
 
                 is MdBlock.Paragraph -> Text(
-                    text = parseInline(block.text),
+                    text = block.inline,
                     color = colors.onSurfaceContainer,
                     fontSize = BodySize,
                     lineHeight = BodyLineHeight,
@@ -93,7 +93,7 @@ internal fun MarkdownText(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = parseInline(block.text),
+                        text = block.inline,
                         color = colors.onSurfaceContainer,
                         fontSize = BodySize,
                         lineHeight = BodyLineHeight,
@@ -102,7 +102,7 @@ internal fun MarkdownText(
                 }
 
                 is MdBlock.Quote -> Text(
-                    text = parseInline(block.text),
+                    text = block.inline,
                     color = colors.onSurfaceSecondary,
                     fontSize = BodySize,
                     lineHeight = BodyLineHeight,
@@ -159,7 +159,7 @@ private fun HeadingBlock(block: MdBlock.Heading) {
         2 -> colors.primary
         else -> colors.onSurfaceContainer
     }
-    val text = parseInline(block.text)
+    val text = block.inline
 
     if (block.level == 2) {
         // 主色竖条 + 标题，形成明显的小节开头
@@ -184,10 +184,32 @@ private fun HeadingBlock(block: MdBlock.Heading) {
 
 /** Markdown 块级元素 */
 private sealed interface MdBlock {
-    data class Heading(val level: Int, val text: String) : MdBlock
-    data class Paragraph(val text: String) : MdBlock
-    data class Bullet(val text: String) : MdBlock
-    data class Quote(val text: String) : MdBlock
+    /**
+     * [inline] 在解析阶段就算好：parseInline 是纯函数（只带字体样式，不读主题色），
+     * 放到组合期等于每次重组都把整篇长文案重扫一遍 —— 而块列表本身是按 markdown 记忆的，
+     * 同一个 text 永远得到同一个 AnnotatedString。
+     */
+    data class Heading(
+        val level: Int,
+        val text: String,
+        val inline: AnnotatedString = parseInline(text),
+    ) : MdBlock
+
+    data class Paragraph(
+        val text: String,
+        val inline: AnnotatedString = parseInline(text),
+    ) : MdBlock
+
+    data class Bullet(
+        val text: String,
+        val inline: AnnotatedString = parseInline(text),
+    ) : MdBlock
+
+    data class Quote(
+        val text: String,
+        val inline: AnnotatedString = parseInline(text),
+    ) : MdBlock
+
     data object Divider : MdBlock
 }
 
