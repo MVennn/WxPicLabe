@@ -10,8 +10,8 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.util.Log;
+import android.util.LruCache;
 
-import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -35,7 +35,6 @@ import io.github.MVennn.WxPicLabel.feature.imglabel.RenameRules;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RepeatCounter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.RepeatWindow;
 import io.github.MVennn.WxPicLabel.feature.imglabel.ScopeGate;
-import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.TextFilter;
 import io.github.MVennn.WxPicLabel.feature.imglabel.UiHud;
 import io.github.MVennn.WxPicLabel.feature.imglabel.UiSender;
@@ -76,9 +75,25 @@ public class WxPicLabelModule extends XposedModule {
     private static volatile Method propMethod;
     /** isImage 按消息 Class 缓存命中的 getType() Method；空数组表示查过但没匹配。 */
     private static final ConcurrentHashMap<Class<?>, Method[]> imageTypeMethods = new ConcurrentHashMap<>();
+    /**
+     * findListField 的按类缓存。
+     *
+     * <p>原来每批（接管一批 + 兜底一批）都要把参数类的全部字段反射扫一遍、逐个 fd.get
+     * 判类型；同一个 qa0.k 类每批都长一个样，扫第二遍纯属白做。命中后仍按实例验一次
+     * 值确实是 List —— 该字段在本实例上为 null 时退回全扫描，行为与改前逐字一致。
+     */
+    private static final ConcurrentHashMap<Class<?>, Field> listFieldCache = new ConcurrentHashMap<>();
+    /** talkerOfArg 的 ia5.a#o() 按类缓存；MISSING 哨兵表示这个类没有 0 参 o()。 */
+    private static final Object MISSING = new Object();
+    private static final ConcurrentHashMap<Class<?>, Object> talkerArgMethods = new ConcurrentHashMap<>();
+    /** ActivityThread#currentApplication 的反射句柄与结果缓存（热路径上不再每次 Class.forName）。 */
+    private static volatile Method currentApplicationMethod;
+    private static volatile Context appContextCache;
     /** 兜底 flush 同一时刻最多挂一个；onPackageLoaded 重装时轮询只建一次。 */
     private final AtomicBoolean flushPending = new AtomicBoolean(false);
     private final AtomicBoolean pollerStarted = new AtomicBoolean(false);
+    /** 好友名单同步的在途闸：并发刷新只跑一条，别为了点两下「刷新」起两条线程抢 rcontact。 */
+    private final AtomicBoolean friendSyncing = new AtomicBoolean(false);
     /** 是否主进程（见 onModuleLoaded）。 */
     private volatile boolean mainProcess;
 
@@ -91,13 +106,53 @@ public class WxPicLabelModule extends XposedModule {
 
     /** 我们自己重放 on5.f#a 时的递归保护。 */
     private final ThreadLocal<Boolean> replayGuard = new ThreadLocal<>();
-    private volatile Method entryMethod;
-    private volatile Object entryThis;
-    private volatile Object[] entryArgs;
+    /**
+     * 一次接管的完整重放上下文（入口方法 + 目标对象 + 实参）。
+     *
+     * <p>改前这里是三个 volatile 字段，第二代接管的调用会把第一代的实参就地覆盖：
+     * 上一批正在逐张重放时，第二批一进来就把 {@code entryArgs} 换成自己的，
+     * 上一批随后 {@code invoke} 出去的就是第二批的参数 —— 轻则图文错位，
+     * 重则整批抛「entry not captured」，两边的图都发不出去。
+     * 改成每批一份、挂在接管线程的 ThreadLocal 上，两批各用各的，互不覆盖。
+     */
+    private static final class ReplayCtx {
+        final Method method;
+        final Object self;
+        final Object[] args;
+
+        ReplayCtx(Method method, Object self, Object[] args) {
+            this.method = method;
+            this.self = self;
+            this.args = args;
+        }
+
+        boolean ready() {
+            return method != null && args != null;
+        }
+    }
+
+    /** 接管线程自己的重放上下文；replayOne / replayOriginal 都从这里取。 */
+    private final ThreadLocal<ReplayCtx> replayCtx = new ThreadLocal<>();
+
+    /**
+     * 「现在有一批正在逐张重放」的独占位。
+     *
+     * <p>只看 {@code takeoverUntil} 存在毫秒级空档：两个入口线程同时进来、都读到
+     * 上一批的 0，就会双双接管，抢同一个发送成功计数。改成 CAS：先到先得，
+     * 后来的那一批直接排进兜底队列。
+     */
+    private final AtomicBoolean replayActive = new AtomicBoolean(false);
     private volatile Method vjMethod;
     private volatile Object vjService;
     /** 单张图「发送成功」事件计数（xm5.y#Fj）。 */
     private final AtomicInteger imageSent = new AtomicInteger();
+    /**
+     * 计数变化的等待闸：钩子侧 notifyAll，接管线程 wait 到有新事件为止。
+     *
+     * <p>改前是 {@code sleepQuietly(20L)} 忙等，一张图最多等满 confirmtimeout（12 秒）
+     * 就是 600 次无意义唤醒；换成等待/唤醒后同一张图通常 0 次空转，唤醒即走。
+     */
+    private final Object sentSignal = new Object();
     /** 连续几张小图等不到成功事件；到 2 次就不再等，直接按固定间隔走。 */
     private volatile int sentMisses;
     /** 接管期间禁止兜底队列抢发。 */
@@ -129,6 +184,12 @@ public class WxPicLabelModule extends XposedModule {
      * （令牌写进去了，微信进程直到下次重启才「发现」它变了）。
      */
     private static final long CFG_TTL_MS = 3000L;
+    /** 重附着在途标记：一次没回来之前不排队第二次（见 cfgPrefs 的注释）。 */
+    private final AtomicBoolean cfgAttaching = new AtomicBoolean();
+    /** 白名单集合的最近一次读数；「快照时间戳 + 键名」一起比对，快照换了就自然失效。 */
+    private volatile String cfgSetKey;
+    private volatile long cfgSetStamp = -1L;
+    private volatile Set<String> cfgSetValue;
     /** 同名图片计数仓库（落在微信自己的 SharedPreferences 里）。 */
     private volatile RepeatCounter repeat;
     /** 本批「选图条目 → 要发的文字 + 序号」缓存，防止同一个条目被计两次次数。 */
@@ -151,6 +212,10 @@ public class WxPicLabelModule extends XposedModule {
     private volatile String lastEditsToken;
     /** 已处理过的「清空发送记录」令牌（轮询侧比对；发送链路自己也会比一次）。 */
     private volatile String lastResetToken;
+    /** 好友回传重试的下一次时间点；0 = 没有待重试。 */
+    private volatile long friendRetryAt;
+    /** 好友回传连续失败次数：退避 5s×(1+n)，上限 60s。 */
+    private volatile int friendFailures;
     /** 批次自增号：同一毫秒起两批也不会撞 id。 */
     private final java.util.concurrent.atomic.AtomicInteger batchSeq =
             new java.util.concurrent.atomic.AtomicInteger();
@@ -197,8 +262,15 @@ public class WxPicLabelModule extends XposedModule {
      * <p>启动后自动跑一次（等微信自己的库打开），设置页点「刷新」时由令牌触发再跑。
      * 抓的是**当前登录账号**的 rcontact，所以换号即换名单。
      */
-    private void requestFriendSync(final String why) {
-        new Thread(() -> {
+    /** @return 是否真的起了这一轮抓取（在途闸拒绝时返回 false，调用方据此决定要不要再排期） */
+    private boolean requestFriendSync(final String why) {
+        // 在途闸：启动探针与「刷新」令牌可能挨着触发（点两下也会），
+        // 两条线程同时抓 rcontact 既慢又白占内存，只放第一条进去。
+        if (!friendSyncing.compareAndSet(false, true)) {
+            log("friends: sync already running, skip reason=" + why);
+            return false;
+        }
+        Thread sync = new Thread(() -> {
             try {
                 List<FriendExporter.Entry> list = FriendExporter.fetch(loader(), this::log);
                 int friends = 0;
@@ -217,11 +289,46 @@ public class WxPicLabelModule extends XposedModule {
                     log("friends: no app context, skip push");
                     return;
                 }
-                FriendExporter.push(ctx, list, this::log);
+                if (FriendExporter.push(ctx, list, this::log)) {
+                    friendFailures = 0;
+                    friendRetryAt = 0L;
+                } else {
+                    scheduleFriendRetry("push-failed");
+                }
             } catch (Throwable t) {
                 log("friends: sync failed: " + t);
+                // 抓取失败也要重试：启动探针 12 秒时微信自己的库可能还没开
+                scheduleFriendRetry("fetch-failed");
+            } finally {
+                friendSyncing.set(false);
             }
-        }, "wxpiclabel-friends-sync").start();
+        }, "wxpiclabel-friends-sync");
+        // daemon：这条抓取线程不能拖住微信进程退出（改前默认非守护线程）
+        sync.setDaemon(true);
+        sync.start();
+        return true;
+    }
+
+    /** 排一次好友回传重试：5s×(1+失败次数)，上限 60s —— 与发送记录回传同一口径。 */
+    private void scheduleFriendRetry(String why) {
+        int n = friendFailures;
+        friendFailures = n + 1;
+        long delay = Math.min(60_000L, 5_000L * (1L + n));
+        friendRetryAt = System.currentTimeMillis() + delay;
+        log("friends: retry in " + delay + "ms reason=" + why);
+    }
+
+    /** 轮询侧：到点就再抓一次；在途闸拒绝时 3 秒后重排，不让重试链断掉。 */
+    private void checkFriendRetry() {
+        long at = friendRetryAt;
+        if (at == 0L || System.currentTimeMillis() < at) {
+            return;
+        }
+        if (requestFriendSync("retry")) {
+            friendRetryAt = 0L;
+        } else {
+            friendRetryAt = System.currentTimeMillis() + 3_000L;
+        }
     }
 
     /** 设置页点了「刷新好友名单」就把令牌换一个新值，这里比对后重新抓取。 */
@@ -315,10 +422,20 @@ public class WxPicLabelModule extends XposedModule {
             if (paramsIdx < 0 || callbackIdx < 0) {
                 continue;
             }
+            // 接管靠「拦截里 return null」吃掉这一批：只认返回 void 的重载。
+            // 万一某个微信版本的 a() 返回 boolean/int，返回 null 会让宿主当场拆箱崩掉
+            // —— 那等于把一次优化做成微信闪退。返回类型不对就只走兜底队列。
+            if (m.getReturnType() != void.class) {
+                log("takeover: skip non-void a/" + pt.length + " returns "
+                        + m.getReturnType().getName());
+                continue;
+            }
             final int pi = paramsIdx;
             final int ci = callbackIdx;
-            if (!markHooked("on5.f#a/" + pt.length + "@" + System.identityHashCode(cls.getClassLoader()))) {
-                break;
+            final String hookKey = "on5.f#a/" + pt.length + "@"
+                    + System.identityHashCode(cls.getClassLoader());
+            if (isHooked(hookKey)) {
+                return;
             }
             try {
                 hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
@@ -355,9 +472,16 @@ public class WxPicLabelModule extends XposedModule {
                                     log("takeover: talker=" + talker + " not in scope, let wechat send");
                                     return chain.proceed();
                                 }
-                                entryMethod = m;
-                                entryThis = chain.getThisObject();
-                                entryArgs = chain.getArgs().toArray();
+                                if (System.currentTimeMillis() < takeoverUntil) {
+                                    // 上一批还在逐张重放：这一批要是也接管，两批会抢同一个
+                                    // 「发送成功」计数和同一份列表字段，谁都对不齐。
+                                    // 交回微信原样发，文件名排进兜底队列，等上一批收工后补。
+                                    log("takeover: previous batch still running, defer text");
+                                    armDeferred(params);
+                                    return chain.proceed();
+                                }
+                                ReplayCtx ctx = new ReplayCtx(m, chain.getThisObject(),
+                                        chain.getArgs().toArray());
                                 if (!ensureReplayReady()) {
                                     log("takeover: replay not ready, let wechat send");
                                     return chain.proceed();
@@ -365,16 +489,27 @@ public class WxPicLabelModule extends XposedModule {
                                 log("takeover: intercepted, params=" + className(params)
                                         + " talker.c=" + talker
                                         + " talker.ia5a=" + talkerOfArg(chain.getArgs()));
+                                if (!replayActive.compareAndSet(false, true)) {
+                                    // 两个入口线程在同一毫秒撞上：只有一个能真接管
+                                    log("takeover: batch claim lost, defer text");
+                                    armDeferred(params);
+                                    return chain.proceed();
+                                }
                                 if (callback instanceof Runnable) {
                                     main.post((Runnable) callback);   // 相册收工，别卡「正在发送中」
                                 }
-                                startReplay(params);
+                                startReplay(params, ctx);
                                 return null;
                             } catch (Throwable t) {
+                                // 接管没起来就把独占位还回去，否则后续每一批都会一直排队
+                                replayActive.set(false);
                                 log("takeover: intercept failed, fallback to wechat: " + t);
                                 return chain.proceed();
                             }
                         });
+                // 挂成功才记账：改前是先记账再挂，一次 hook 失败就把该 loader 永久放弃，
+                // 后面的 installAll 轮次再也不会补挂（表现为「接管能力时有时没有」）
+                markHooked(hookKey);
                 log("hooked takeover entry: on5.f#a/" + pt.length);
                 return;
             } catch (Throwable t) {
@@ -433,7 +568,7 @@ public class WxPicLabelModule extends XposedModule {
     }
 
     /** 后台线程逐张发：图 k → 等它发送成功 → 文件名 k → 下一张。 */
-    private void startReplay(Object params) {
+    private void startReplay(Object params, ReplayCtx ctx) {
         takeoverUntil = System.currentTimeMillis() + 180_000L;
 
         // 时序参数每批只读一次：longProp 每次都要 Class.forName + getMethod，
@@ -473,19 +608,26 @@ public class WxPicLabelModule extends XposedModule {
             }
         });
 
-        new Thread(() -> {
+        Thread worker = new Thread(() -> {
+            // 本批的重放上下文只认这一条线程：别的批次再进来也覆盖不到它
+            replayCtx.set(ctx);
             List<?> origin = null;
             Field listField = findListField(params);
+            // 已经整条走完的条目数。必须声明在 try 之外：catch 里要用它决定「从第几个交回微信」，
+            // 而 try 块内声明的局部量在 catch 里不可见（Java 作用域）。
+            int completed = 0;
             try {
                 if (listField == null) {
                     log("takeover: no list field on " + className(params) + ", let wechat send");
                     replayOriginal();
+                    releaseBatchRefs();
                     return;
                 }
                 List<?> src = (List<?>) listField.get(params);
                 if (src == null || src.isEmpty()) {
                     log("takeover: empty selection, let wechat send");
                     replayOriginal();
+                    releaseBatchRefs();
                     return;
                 }
                 origin = new ArrayList<>(src);
@@ -526,14 +668,17 @@ public class WxPicLabelModule extends XposedModule {
                             noteSent(draft);
                         }
                         sleepQuietly(gap);
+                        completed = k + 1;
                     } catch (Throwable t) {
                         log("takeover: image#" + idx + " failed: " + t);
                         failed.add(entry);
+                        completed = k + 1;
                     }
                 }
                 listField.set(params, origin);
-                // 这一批的文字已经由接管发完，兜底轮询别再补一遍
-                pendingDrafts = null;
+                // 这里**不能**再 pendingDrafts = null：接管期间进来的下一批会被 armDeferred
+                // 排进兜底队列（那是**它**的 drafts），批末一巴掌清掉就是把用户的文字吞了。
+                // 本批自己的文字在 startReplay 开头（preDrafts）已经取走并清空。
                 if (sentMisses > 0) {
                     // 有没等到确认的：等微信把在途上传排空再收工，
                     // 否则用户紧接着发的文字会排在图片上传后面转圈
@@ -554,24 +699,49 @@ public class WxPicLabelModule extends XposedModule {
                     listField.set(params, failed);
                     replayOriginal();
                 }
+                // 这一批彻底收工：把抓着的微信对象放开（见 releaseBatchRefs）
+                releaseBatchRefs();
             } catch (Throwable t) {
                 log("takeover: replay aborted: " + t);
-                restoreAndFallback(params, listField, origin);
+                restoreAndFallback(params, listField, origin, completed);
+                releaseBatchRefs();
             }
-        }, "wxpiclabel-takeover").start();
+        }, "wxpiclabel-takeover");
+        // daemon：接管线程不参与「微信进程能不能退出」这件事
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
+     * 一批走完就把微信那边的对象引用放开。
+     *
+     * <p>{@code entryArgs} 抓着整批选图参数（qa0.k、会话对象、缩略图 Uri 都在里面），
+     * {@code batchTexts} 的键是每一个选图条目对象本身。改前这两份引用都要挂到
+     * **下一批**才被覆盖 —— 用户发完图接着聊半小时，那批图和整份参数就一直躺在
+     * 微信进程堆里。批末主动断引用，堆上只留 Draft 这种纯字符串的小对象。
+     */
+    private void releaseBatchRefs() {
+        replayCtx.remove();
+        batchTexts = null;
+        replayActive.set(false);
+        // 收工就把「批还在跑」的窗口关掉。早退分支（没找到列表字段、选图为空）不经过批末
+        // 那段代码，改前 takeoverUntil 会一直挂到 180s 之后：期间新发的一批全被 defer 进兜底队列，
+        // 而 flushFallback 又拿同一个 takeoverUntil 当闸门 —— 表现就是「文字过了三分钟才冒出来」。
+        takeoverUntil = 0L;
     }
 
     /** 调一次微信的发送入口（列表里当前只有一张）。 */
     private void replayOne() throws Throwable {
-        Method m = entryMethod;
-        Object[] args = entryArgs;
-        if (m == null || args == null) {
+        ReplayCtx c = replayCtx.get();
+        if (c == null || !c.ready()) {
             throw new IllegalStateException("entry not captured");
         }
         replayGuard.set(Boolean.TRUE);
         try {
-            m.setAccessible(true);
-            Object ret = Modifier.isStatic(m.getModifiers()) ? m.invoke(null, args) : m.invoke(entryThis, args);
+            c.method.setAccessible(true);
+            Object ret = Modifier.isStatic(c.method.getModifiers())
+                    ? c.method.invoke(null, c.args)
+                    : c.method.invoke(c.self, c.args);
             log("takeover: entry replay -> " + ret);
         } finally {
             replayGuard.remove();
@@ -580,16 +750,17 @@ public class WxPicLabelModule extends XposedModule {
 
     /** 兜底：把微信原来那次调用补回去，保证图照样能发。 */
     private void replayOriginal() {
-        Method m = entryMethod;
-        Object[] args = entryArgs;
-        if (m == null || args == null) {
+        ReplayCtx c = replayCtx.get();
+        if (c == null || !c.ready()) {
             log("takeover: nothing to replay");
             return;
         }
         replayGuard.set(Boolean.TRUE);
         try {
-            m.setAccessible(true);
-            Object r = Modifier.isStatic(m.getModifiers()) ? m.invoke(null, args) : m.invoke(entryThis, args);
+            c.method.setAccessible(true);
+            Object r = Modifier.isStatic(c.method.getModifiers())
+                    ? c.method.invoke(null, c.args)
+                    : c.method.invoke(c.self, c.args);
             log("takeover: wechat original send replayed -> " + r);
         } catch (Throwable t) {
             log("takeover: replay original failed: " + t);
@@ -598,26 +769,48 @@ public class WxPicLabelModule extends XposedModule {
         }
     }
 
-    /** 异常路径：列表恢复成全部，交回微信，并把文件名交给兜底队列。 */
-    private void restoreAndFallback(Object params, Field listField, List<?> origin) {
+    /**
+     * 异常路径：把**还没发出去的那几项**交回微信，并把它们的文件名交给兜底队列。
+     *
+     * @param from 已经整条走完的条目数（已重放 + 已处理文字）。改前这里把整份 {@code origin}
+     *             塞回列表再 {@code replayOriginal()}，于是中途异常（比如确认等待被中断）会
+     *             把前面已经发出去的图**再发一遍**，同时 {@code draftFor} 又把它们的计数
+     *             重新 bump 一次 —— 用户看到的是重复的图 + 凭空多出来的「+N」。
+     */
+    private void restoreAndFallback(Object params, Field listField, List<?> origin, int from) {
+        if (origin == null) {
+            takeoverUntil = 0L;
+            if (mainProcess) {
+                main.post(UiHud::end);
+            }
+            replayOriginal();
+            return;
+        }
+        int size = origin.size();
+        int start = Math.max(0, Math.min(from, size));
+        List<Object> rest = start == 0 ? new ArrayList<>(origin) : new ArrayList<>(origin.subList(start, size));
         try {
-            if (listField != null && origin != null) {
-                listField.set(params, origin);
+            if (listField != null) {
+                listField.set(params, rest);
             }
         } catch (Throwable ignored) {
-            // 恢复失败也只能继续兜底
+            // 恢复失败也只能继续兜底：此时微信那边拿的是上一次 set 进去的单条列表
         }
         takeoverUntil = 0L;
         if (mainProcess) {
             main.post(UiHud::end);
         }
-        if (origin != null) {
-            ArrayList<Draft> drafts = new ArrayList<>();
-            for (Object o : origin) {
-                drafts.add(draftFor(o));   // 命中本批缓存，不会重复计数
-            }
-            armFallback(drafts, 0);
+        if (start >= size) {
+            log("takeover: aborted after last entry, nothing to replay");
+            replayOriginal();
+            return;
         }
+        log("takeover: restore entries " + start + ".." + size + " to wechat, text goes to fallback");
+        ArrayList<Draft> drafts = new ArrayList<>();
+        for (Object o : rest) {
+            drafts.add(draftFor(o));   // 命中本批缓存，不会重复计数
+        }
+        armFallback(drafts, 0);
         replayOriginal();
     }
 
@@ -637,15 +830,33 @@ public class WxPicLabelModule extends XposedModule {
         }
         long start = System.currentTimeMillis();
         long deadline = start + confirmTimeout;
-        while (System.currentTimeMillis() < deadline) {
-            if (imageSent.get() > base) {
-                sentMisses = 0;
-                log("takeover: image#" + idx + "/" + total + " sent-confirmed after "
-                        + (System.currentTimeMillis() - start) + "ms");
-                sleepQuietly(confirmGap);
-                return;
+        boolean confirmed = false;
+        synchronized (sentSignal) {
+            while (true) {
+                if (imageSent.get() > base) {
+                    confirmed = true;
+                    break;
+                }
+                long remain = deadline - System.currentTimeMillis();
+                if (remain <= 0L) {
+                    break;
+                }
+                try {
+                    // 有上限的等待：即使某次 notify 落在判定与 wait 之间（理论上不会，
+                    // 两边都持同一把锁）也最多 200ms 就重新看一次计数，不会白等到 12 秒
+                    sentSignal.wait(Math.min(remain, 200L));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
-            sleepQuietly(20L);
+        }
+        if (confirmed) {
+            sentMisses = 0;
+            log("takeover: image#" + idx + "/" + total + " sent-confirmed after "
+                    + (System.currentTimeMillis() - start) + "ms");
+            sleepQuietly(confirmGap);
+            return;
         }
         sentMisses++;
         log("takeover: image#" + idx + "/" + total + " no send-confirm in "
@@ -672,7 +883,20 @@ public class WxPicLabelModule extends XposedModule {
                 log("takeover: drain idle after " + (System.currentTimeMillis() - start) + "ms");
                 return;
             }
-            sleepQuietly(80L);
+            // 同上：静默期改成等唤醒（最多 80ms 再看一眼），不再 80ms 醒一次空转
+            synchronized (sentSignal) {
+                if (imageSent.get() == last) {
+                    long remain = Math.min(80L, max - (System.currentTimeMillis() - start));
+                    if (remain > 0L) {
+                        try {
+                            sentSignal.wait(remain);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                    }
+                }
+            }
         }
         log("takeover: drain timeout after " + (System.currentTimeMillis() - start) + "ms");
     }
@@ -713,17 +937,26 @@ public class WxPicLabelModule extends XposedModule {
             if (!"Vj".equals(m.getName()) || m.getParameterCount() != 1) {
                 continue;
             }
-            if (!markHooked("Vj@" + System.identityHashCode(cl))) {
-                continue;
+            final String hookKey = "Vj@" + System.identityHashCode(cl);
+            if (isHooked(hookKey)) {
+                return;
             }
             try {
                 hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             if (!Boolean.TRUE.equals(replayGuard.get())) {
-                                armFromParams(chain.getArg(0));
+                                // 这一路跑在 Binder 线程的 PROTECTIVE 回调里：异常抛出去宿主只看到
+                                // 默认返回值（这一批静默不带文件名），日志里一个字都没有。自己兜住。
+                                try {
+                                    armFromParams(chain.getArg(0));
+                                } catch (Throwable t) {
+                                    log("fallback: armFromParams failed: " + t);
+                                }
                             }
                             return chain.proceed();
                         });
+                // 挂成功才记账：先记账再挂，一次失败就再也不会重试
+                markHooked(hookKey);
                 log("hooked batch entry: db0.u#Vj");
             } catch (Throwable t) {
                 log("hook Vj failed: " + t);
@@ -754,8 +987,9 @@ public class WxPicLabelModule extends XposedModule {
                 continue;
             }
             final int fi = f9Idx;
-            if (!markHooked("Fj" + pt.length + "@" + System.identityHashCode(cl))) {
-                continue;
+            final String hookKey = "Fj" + pt.length + "@" + System.identityHashCode(cl);
+            if (isHooked(hookKey)) {
+                return;
             }
             try {
                 hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
@@ -764,12 +998,17 @@ public class WxPicLabelModule extends XposedModule {
                             try {
                                 if (isImage(chain.getArg(fi))) {
                                     imageSent.incrementAndGet();
+                                    // 计数先加、再唤醒：等待方基于「新值」判断，不会被假唤醒骗走
+                                    synchronized (sentSignal) {
+                                        sentSignal.notifyAll();
+                                    }
                                 }
                             } catch (Throwable ignored) {
                                 // 只做计数
                             }
                             return ret;
                         });
+                markHooked(hookKey);
                 log("hooked send-succ: xm5.y#Fj/" + pt.length + " f9Idx=" + fi);
             } catch (Throwable t) {
                 log("hook send-succ failed: " + t);
@@ -790,16 +1029,19 @@ public class WxPicLabelModule extends XposedModule {
      * 「仅选中的会话生效」开着且当前会话不在名单 → 不注入。
      */
     private void hookAlbumToggle(ClassLoader cl) {
-        if (!markHooked("albumToggle@" + System.identityHashCode(cl))) {
+        if (isHooked("albumToggle@" + System.identityHashCode(cl))) {
             return;
         }
         try {
             final Class<?> album = Reflect.findClass(
                     "com.tencent.mm.plugin.gallery.ui.AlbumPreviewUI", cl);
             if (album == null) {
+                // 不打标记：类可能晚一轮才被 loader 加载出来，先标记等于「一次没找到，
+                // 以后再也不补挂」，相册里的开关就永久消失了
                 log("memory: AlbumPreviewUI not found, album toggle disabled");
                 return;
             }
+            markHooked("albumToggle@" + System.identityHashCode(cl));
             for (java.lang.reflect.Constructor<?> c : album.getDeclaredConstructors()) {
                 try {
                     c.setAccessible(true);
@@ -865,6 +1107,52 @@ public class WxPicLabelModule extends XposedModule {
     // ------------------------------------------------------------------ 兜底队列
 
     /** 用 Vj 的实参武装兜底队列（只在接管不生效时才会走到）。 */
+    /**
+     * 上一批还在逐张重放时进来的新一批：不接管，只把文件名算好塞进兜底队列。
+     *
+     * <p>为什么不能直接复用 {@link #armFromParams}：那道闸在接管进行中会直接返回，
+     * 这一批文字就整批丢了。这里只保留「总开关 / 记忆勾选」两道，文字算完排队，
+     * 等上一批收工、{@code takeoverUntil} 归零后由兜底轮询按间隔补发。
+     */
+    private void armDeferred(Object params) {
+        if (params == null || !featureEnabled() || !memoryOn()) {
+            return;
+        }
+        // 用自己的一张表：接管线程那张正在被用，不能共写
+        IdentityHashMap<Object, Draft> local = new IdentityHashMap<>();
+        try {
+            Field f = findListField(params);
+            if (f == null) {
+                return;
+            }
+            List<?> list = (List<?>) f.get(params);
+            if (list == null || list.isEmpty()) {
+                return;
+            }
+            ArrayList<Draft> drafts = new ArrayList<>();
+            for (Object o : list) {
+                drafts.add(draftFor(o, local));
+            }
+            // 队列里已经排着一批（更早的 defer，或刚被 armFromParams 装上的）：
+            // 追加到队尾，别把后一批的文字吞掉。此时**不能**重置 pendingIndex ——
+            // 前面那批可能已经补发到第 N 格，从 0 重来等于把发过的再发一遍。
+            ArrayList<Draft> queued = pendingDrafts;
+            if (queued != null) {
+                ArrayList<Draft> merged = new ArrayList<>(queued);
+                merged.addAll(drafts);
+                pendingDrafts = merged;
+                log("fallback: deferred append, +" + drafts.size() + " total=" + merged.size()
+                        + " at=" + pendingIndex);
+                return;
+            }
+            curBatch = newBatchId();
+            armFallback(drafts, 0);
+            log("fallback: deferred at takeover, drafts=" + drafts.size());
+        } catch (Throwable t) {
+            log("fallback: defer failed: " + t);
+        }
+    }
+
     private void armFromParams(Object params) {
         if (params != null) {
             lastTalker = talkerOf(params);
@@ -887,9 +1175,11 @@ public class WxPicLabelModule extends XposedModule {
         if (!scopeAllowed(lastTalker)) {
             return;
         }
-        // 走到这里说明这一批没有接管（接管会先清掉 pendingDrafts），
-        // 缓存属于上一批，换一份新的再算。
-        batchTexts = new IdentityHashMap<>();
+        // 走到这里说明这一批没有接管（接管会先清掉 pendingDrafts），缓存属于上一批。
+        // 用**局部表**算完再一次性换上：改前是先换全局表、再逐条往里填，而这条路径跑在
+        // Binder 线程上，接管线程此时若正好问到同一个条目就会「表里没有 → 重新 bump」，
+        // 次数凭空 +1。表整个换引用是原子的，换早了没用，换晚了也不影响正确性。
+        IdentityHashMap<Object, Draft> local = new IdentityHashMap<>();
         Field f = findListField(params);
         if (f == null) {
             return;
@@ -901,8 +1191,9 @@ public class WxPicLabelModule extends XposedModule {
             }
             ArrayList<Draft> drafts = new ArrayList<>();
             for (Object o : list) {
-                drafts.add(draftFor(o));
+                drafts.add(draftFor(o, local));
             }
+            batchTexts = local;
             // 兜底发送整批共用同一个批次 id，记录页把它们折成一组
             curBatch = newBatchId();
             armFallback(drafts, 0);
@@ -978,13 +1269,14 @@ public class WxPicLabelModule extends XposedModule {
         worker.postDelayed(poll, 1200L);
     }
 
-    /** 6 个配置/记录检查，顺序与改前 :919-925 逐字一致；始终在 worker 上跑。 */
+    /** 配置/记录检查；始终在 worker 上跑。 */
     private void runChecks() {
         checkScopeRefresh();
         checkRecordReset();
         checkRecordEdits();
         checkRecordDump();
         retryRecordsPush();
+        checkFriendRetry();
         checkSelfTest();
     }
 
@@ -1002,6 +1294,11 @@ public class WxPicLabelModule extends XposedModule {
      */
     private void checkSelfTest() {
         String text = prop("text");
+        // 调试属性是外部输入：真被写成长字符串塞进微信输入框，会连带把整条发送链路拖慢
+        if (text != null && text.length() > 200) {
+            log("selftest: text too long (" + text.length() + "), ignored");
+            text = null;
+        }
         if (text != null && !text.isEmpty() && !text.equals(lastSelfTestText)) {
             lastSelfTestText = text;
             log("selftest: send text=" + text);
@@ -1037,19 +1334,25 @@ public class WxPicLabelModule extends XposedModule {
             return;
         }
         if (!featureEnabled()) {
-            pendingDrafts = null;
+            if (pendingDrafts == drafts) {
+                pendingDrafts = null;
+            }
             return;
         }
         // 「记忆」没勾：这批不带文件名，兜底队列直接清掉
         if (!memoryOn()) {
             log("fallback: memory off, drop " + drafts.size());
-            pendingDrafts = null;
+            if (pendingDrafts == drafts) {
+                pendingDrafts = null;
+            }
             return;
         }
         // 兜底队列也要过白名单这道闸，否则「接管没跑起来」时白名单会被绕过
         if (!scopeAllowed(lastTalker)) {
             log("fallback: talker=" + lastTalker + " not in scope, drop " + drafts.size());
-            pendingDrafts = null;
+            if (pendingDrafts == drafts) {
+                pendingDrafts = null;
+            }
             return;
         }
         if (System.currentTimeMillis() < takeoverUntil) {
@@ -1057,15 +1360,25 @@ public class WxPicLabelModule extends XposedModule {
         }
         if (System.currentTimeMillis() - pendingAt > 120_000L) {
             log("fallback: expire, dropped " + (drafts.size() - pendingIndex));
-            pendingDrafts = null;
+            if (pendingDrafts == drafts) {
+                pendingDrafts = null;
+            }
             return;
         }
         if (!UiSender.hasInput()) {
             return;   // 聊天页还没回来
         }
+        // 兜底队列是「整表替换」的：这一 tick 里别处可能刚 arm 了下一批
+        // （armFallback 换 pendingDrafts 并清零 pendingIndex）。先确认手里这份还是当前批，
+        // 再动序号 —— 否则会把新批的第 0 格当成旧批的第 i 格跳过，最坏整批算成「发完了」丢掉。
+        if (pendingDrafts != drafts) {
+            return;
+        }
         int i = pendingIndex;
         if (i >= drafts.size()) {
-            pendingDrafts = null;
+            if (pendingDrafts == drafts) {
+                pendingDrafts = null;
+            }
             return;
         }
         Draft draft = drafts.get(i);
@@ -1082,24 +1395,53 @@ public class WxPicLabelModule extends XposedModule {
             noteSent(draft);
         }
         if (pendingIndex >= drafts.size()) {
-            pendingDrafts = null;
-            curBatch = null;
+            if (pendingDrafts == drafts) {
+                pendingDrafts = null;
+                curBatch = null;
+            }
             pushRecords("fallback");
         }
     }
 
     // ------------------------------------------------------------------ 配置与计数
 
-    /** remote preferences（目标进程侧只读）；框架不支持时返回 null，调用方一律走默认值。 */
+    /**
+     * remote preferences（目标进程侧只读）；框架不支持时返回 null，调用方一律走默认值。
+     *
+     * <p>**TTL 到期不再原地等 binder**：调用方常常就是微信主线程里的发送拦截器，
+     * 在那条线上跨进程取一次快照就是一次掉帧。手里已经有旧快照时先把它交出去，
+     * 顺手把重附着排到轮询线程（{@link #pollWorker}，700ms 一跳），配置最多晚一个
+     * TTL 生效 —— 与改前 3s 的刷新粒度本来就是同一个量级。
+     *
+     * <p>手里没有快照（进程刚起来那次）才同步取：这一次没法推迟，推迟就等于整批功能读不到配置。
+     */
     private SharedPreferences cfgPrefs() {
         SharedPreferences p = cfgPrefs;
         if (p != null && System.currentTimeMillis() - cfgAttachedAt < CFG_TTL_MS) {
             return p;
         }
+        if (p != null) {
+            Handler w = pollWorker;
+            if (w != null) {
+                if (cfgAttaching.compareAndSet(false, true)) {
+                    try {
+                        w.post(this::reattachCfg);
+                    } catch (Throwable t) {
+                        cfgAttaching.set(false);
+                    }
+                }
+                return p;
+            }
+        }
+        return attachCfg(p);
+    }
+
+    /** 真正去取一次快照；取不到就沿用旧值（绝不能因为一次异常把功能判成「关」）。 */
+    private SharedPreferences attachCfg(SharedPreferences stale) {
         try {
             SharedPreferences fresh = getRemotePreferences(ConfigKeys.GROUP);
             if (fresh != null) {
-                if (p == null) {
+                if (stale == null) {
                     log("config: remote prefs attached");
                 }
                 cfgPrefs = fresh;
@@ -1107,12 +1449,24 @@ public class WxPicLabelModule extends XposedModule {
                 return fresh;
             }
         } catch (Throwable t) {
-            if (p == null) {
+            if (stale == null) {
                 log("config: remote prefs unavailable: " + t);
             }
         }
-        // 重取失败就沿用上一次的那份：绝不能因为一次异常把功能判成「关」
-        return p;
+        if (stale != null) {
+            // 失败也把时间戳推后：否则每个调用点都会再排一次重取，等于把 binder 掐成死循环
+            cfgAttachedAt = System.currentTimeMillis();
+        }
+        return stale;
+    }
+
+    /** 轮询线程上的重附着（失败也不外抛：下一次 TTL 到期再排）。 */
+    private void reattachCfg() {
+        try {
+            attachCfg(cfgPrefs);
+        } finally {
+            cfgAttaching.set(false);
+        }
     }
 
     private boolean cfgBool(String key, boolean def) {
@@ -1147,21 +1501,50 @@ public class WxPicLabelModule extends XposedModule {
 
     /** 会话白名单判定（规则见 ScopeGate）。 */
     private boolean scopeAllowed(String talker) {
-        if (!cfgBool(ConfigKeys.IMG_LABEL_SCOPE_ONLY_SELECTED,
-                ConfigKeys.DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED)) {
+        // 只取一次句柄：改前 cfgBool 与 cfgStringSet 各过一次 TTL，两个键可能落在
+        // 前后两份快照上——开关刚打开、名单还是旧的那份，读过的人只会以为「白名单没生效」。
+        SharedPreferences p = cfgPrefs();
+        boolean only;
+        try {
+            only = p == null
+                    ? ConfigKeys.DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED
+                    : p.getBoolean(ConfigKeys.IMG_LABEL_SCOPE_ONLY_SELECTED,
+                    ConfigKeys.DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED);
+        } catch (Throwable t) {
+            only = ConfigKeys.DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED;
+        }
+        if (!only) {
             return true;
         }
         return ScopeGate.allowed(true, cfgStringSet(ConfigKeys.IMG_LABEL_SCOPE_IDS), talker);
     }
 
+    /**
+     * 读一个字符串集合。
+     *
+     * <p>{@code getStringSet} 的契约是「每次返回一份拷贝」，而这条路径在每张图前都要走一遍
+     * （scopeAllowed）；一份白名单被拷几十次纯属白造对象。这里按「当前快照时间戳 + 键名」
+     * 缓存一份只读副本：快照一换时间戳就变，缓存自然失效，配置改了不会读到旧名单。
+     */
     private java.util.Set<String> cfgStringSet(String key) {
         SharedPreferences p = cfgPrefs();
         if (p == null) {
             return java.util.Collections.emptySet();
         }
+        long stamp = cfgAttachedAt;
+        java.util.Set<String> hit = cfgSetValue;
+        if (hit != null && stamp == cfgSetStamp && key.equals(cfgSetKey)) {
+            return hit;
+        }
         try {
             java.util.Set<String> v = p.getStringSet(key, null);
-            return v == null ? java.util.Collections.emptySet() : v;
+            java.util.Set<String> out = v == null
+                    ? java.util.Collections.emptySet()
+                    : java.util.Collections.unmodifiableSet(new HashSet<>(v));
+            cfgSetKey = key;
+            cfgSetStamp = stamp;
+            cfgSetValue = out;
+            return out;
         } catch (Throwable t) {
             return java.util.Collections.emptySet();
         }
@@ -1360,19 +1743,27 @@ public class WxPicLabelModule extends XposedModule {
         if (r != null) {
             return r;
         }
-        try {
-            Context ctx = appContext();
-            if (ctx == null) {
-                return null;
+        // 两个线程同时第一次进来会各建一个实例：各自的计数缓存互不认账，第 N 次会来回跳。
+        // 慢路径只走一次，双检后建，热路径仍然零锁。
+        synchronized (this) {
+            r = repeat;
+            if (r != null) {
+                return r;
             }
-            SharedPreferences store = ctx.getSharedPreferences(
-                    "wxpiclabel_repeat", Context.MODE_PRIVATE);
-            r = new RepeatCounter(store);
-            repeat = r;
-        } catch (Throwable t) {
-            log("repeat: store unavailable: " + t);
+            try {
+                Context ctx = appContext();
+                if (ctx == null) {
+                    return null;
+                }
+                SharedPreferences store = ctx.getSharedPreferences(
+                        "wxpiclabel_repeat", Context.MODE_PRIVATE);
+                r = new RepeatCounter(store);
+                repeat = r;
+            } catch (Throwable t) {
+                log("repeat: store unavailable: " + t);
+            }
+            return r;
         }
-        return r;
     }
 
     /**
@@ -1409,6 +1800,15 @@ public class WxPicLabelModule extends XposedModule {
      * 三点半后第一次就会被读数顶成第 2 次而 +2。
      */
     private Draft draftFor(Object entry) {
+        return draftFor(entry, batchTexts);
+    }
+
+    /**
+     * 指定缓存表的版本：接管还在跑时进来的那一批不能共写接管线程那张表
+     * （{@link IdentityHashMap} 不是线程安全的，两批共写会串味），
+     * 所以给它一张自己的表，算完即弃。
+     */
+    private Draft draftFor(Object entry, IdentityHashMap<Object, Draft> cache) {
         String original = labelOfEntry(entry);
         if (original == null || original.isEmpty() || "unknown".equals(original)) {
             return new Draft(original, 0);
@@ -1416,7 +1816,6 @@ public class WxPicLabelModule extends XposedModule {
         // 重命名规则：命中就把文件名换成用户指定的文字。
         // 放在计数之前 —— 计数键跟着**实际发出去的那段文字**走，与「认名字不认内容」一致。
         String label = RenameRules.apply(renameRules(), original);
-        IdentityHashMap<Object, Draft> cache = batchTexts;
         if (cache != null) {
             Draft hit = cache.get(entry);
             if (hit != null) {
@@ -1528,14 +1927,28 @@ public class WxPicLabelModule extends XposedModule {
                 continue;
             }
             try {
-                Method m = a.getClass().getDeclaredMethod("o");
-                m.setAccessible(true);
-                Object v = m.invoke(a);
+                Class<?> cls = a.getClass();
+                Object cached = talkerArgMethods.get(cls);
+                if (cached == null) {
+                    Method found = null;
+                    try {
+                        found = cls.getDeclaredMethod("o");
+                        found.setAccessible(true);
+                    } catch (Throwable ignored) {
+                        // 不是那个类：把「没有 o()」也缓存下来，别每次再抛一遍
+                    }
+                    cached = found == null ? MISSING : found;
+                    talkerArgMethods.put(cls, cached);
+                }
+                if (cached == MISSING) {
+                    continue;
+                }
+                Object v = ((Method) cached).invoke(a);
                 if (v instanceof String) {
                     return (String) v;
                 }
             } catch (Throwable ignored) {
-                // 不是那个类
+                // 调用失败：下一个
             }
         }
         return "-";
@@ -1554,14 +1967,33 @@ public class WxPicLabelModule extends XposedModule {
         }
     }
 
+    /** 只查不记：用于「先确认条件都满足，再落标记」的钩子（见 hookTakeover / hookAlbumToggle）。 */
+    private boolean isHooked(String key) {
+        synchronized (hooked) {
+            return hooked.contains(key);
+        }
+    }
+
     private static Field findListField(Object obj) {
         if (obj == null) {
             return null;
         }
-        for (Field fd : obj.getClass().getDeclaredFields()) {
+        Class<?> cls = obj.getClass();
+        Field cached = listFieldCache.get(cls);
+        if (cached != null) {
+            try {
+                if (cached.get(obj) instanceof List) {
+                    return cached;
+                }
+            } catch (Throwable ignored) {
+                // 缓存的那个字段读不了：退回全扫描
+            }
+        }
+        for (Field fd : cls.getDeclaredFields()) {
             try {
                 fd.setAccessible(true);
                 if (fd.get(obj) instanceof List) {
+                    listFieldCache.put(cls, fd);
                     return fd;
                 }
             } catch (Throwable ignored) {
@@ -1637,25 +2069,53 @@ public class WxPicLabelModule extends XposedModule {
         if (path == null) {
             return "";
         }
-        String name = new File(path).getName();
+        // 手切最后一段：这条路径每张图都走，{@code new File(path).getName()} 为了取个文件名
+        // 要先造对象再走一遍路径归一化，而 Android 的 File 只认 '/' 一个分隔符，
+        // 手切与它的行为等价（尾部斜杠同样按「没有文件名」处理）。
+        int end = path.length();
+        while (end > 0 && path.charAt(end - 1) == '/') {
+            end--;
+        }
+        int slash = end > 0 ? path.lastIndexOf('/', end - 1) : -1;
+        String name = slash >= 0 ? path.substring(slash + 1, end) : path.substring(0, end);
         int dot = name.lastIndexOf('.');
         return dot > 0 ? name.substring(0, dot) : name;
     }
 
+    /**
+     * content:// → 路径 的查询结果缓存。
+     *
+     * <p>同一张图在一批里会被问 2~3 次（接管算一遍、失败交回微信再算一遍、相册注入又一遍），
+     * 而每次都是跨进程读一次媒体库。按 Uri 字符串缓存最近 64 条，够覆盖一批图的常见规模。
+     * 只缓存查到的结果：查不到说明这条 URI 本来就无效，缓存它反而会盖住「文件被重新导入」。
+     */
+    private static final LruCache<String, String> RESOLVE_CACHE = new LruCache<>(64);
+    /** 列名数组提到静态：每次 query 现造 String[] 也是白造。 */
+    private static final String[] RESOLVE_PROJECTION = {"_data", "_display_name"};
+
     /** content:// 的 Uri 只有媒体库 ID，查库换真实路径。 */
     private static String resolveContentUri(Uri uri) {
+        if (uri == null) {
+            return null;
+        }
+        String cacheKey = uri.toString();
+        String cached = RESOLVE_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
         Context ctx = appContext();
         if (ctx == null) {
             return null;
         }
         Cursor c = null;
         try {
-            c = ctx.getContentResolver().query(uri, new String[]{"_data", "_display_name"}, null, null, null);
+            c = ctx.getContentResolver().query(uri, RESOLVE_PROJECTION, null, null, null);
             if (c != null && c.moveToFirst()) {
                 int di = c.getColumnIndex("_data");
                 if (di >= 0) {
                     String d = c.getString(di);
                     if (d != null && !d.isEmpty()) {
+                        RESOLVE_CACHE.put(cacheKey, d);
                         return d;
                     }
                 }
@@ -1663,7 +2123,9 @@ public class WxPicLabelModule extends XposedModule {
                 if (ni >= 0) {
                     String n = c.getString(ni);
                     if (n != null && !n.isEmpty()) {
-                        return "/virtual/" + n;
+                        String virtual = "/virtual/" + n;
+                        RESOLVE_CACHE.put(cacheKey, virtual);
+                        return virtual;
                     }
                 }
             }
@@ -1678,11 +2140,25 @@ public class WxPicLabelModule extends XposedModule {
     }
 
     private static Context appContext() {
+        // 拿到过就复用：这条路径在接管（逐张）、兜底、记录回传、相册注入里都是热调用，
+        // 改前每次 Class.forName + getMethod + invoke 三连，纯属白烧 CPU。
+        Context cached = appContextCache;
+        if (cached != null) {
+            return cached;
+        }
         try {
-            Class<?> at = Class.forName("android.app.ActivityThread");
-            Method m = at.getMethod("currentApplication");
+            Method m = currentApplicationMethod;
+            if (m == null) {
+                m = Class.forName("android.app.ActivityThread").getMethod("currentApplication");
+                currentApplicationMethod = m;
+            }
             Object app = m.invoke(null);
-            return app instanceof Context ? (Context) app : null;
+            if (app instanceof Context) {
+                Context ctx = (Context) app;
+                appContextCache = ctx;
+                return ctx;
+            }
+            return null;
         } catch (Throwable t) {
             return null;
         }

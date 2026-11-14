@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 「发送设置」的计数仓库：**同名**图片发过几次，外加一份**逐次发送台账**。
@@ -55,7 +56,13 @@ public final class RepeatCounter {
     /** 已应用过的清空令牌。 */
     private static final String KEY_RESET = "__reset";
 
-    /** 台账序号计数器（单调递增，永不复用）。 */
+    /**
+     * 台账序号计数器（单调递增，永不复用）。
+     *
+     * <p>「只增不复用」是硬不变式，清空记录时也要把它留下：模块 App 侧持久保存的
+     * 编辑 / 删除动作只带序号（{@code d|seq}、{@code l|seq|名字}），序号一旦被回收，
+     * 之后再应用那批旧动作就会打到同号的新事件上（详见 {@link #applyResetIfNeeded}）。
+     */
     private static final String KEY_SEQ = "__seq";
 
     /** 是否已经把旧计数表迁移成台账。 */
@@ -75,6 +82,26 @@ public final class RepeatCounter {
 
     /** 台账最多留多少条事件，超出按时间淘汰最旧的。 */
     private static final int MAX_EVENTS = 600;
+
+    /**
+     * {@link #trimIfNeeded} 的调用计数，进程内共享。
+     *
+     * <p>裁剪只是「超了才动手」的软上限，晚十来次发送再裁结果完全一样；
+     * 而每张图都全扫一遍计数键纯属白烧。计数从 0 起、第一次调用必定命中，
+     * 所以进程重启后首张图仍会真扫一次 —— 升级上来的、被外部写脏的数据不会漏裁。
+     */
+    private static final AtomicInteger TRIM_TICK = new AtomicInteger();
+
+    /** 每这么多次 bump 才真扫一次计数表。 */
+    private static final int TRIM_EVERY = 16;
+
+    /**
+     * 进程内已知的台账条数；负数 = 还不知道（刚启动 / 刚迁移 / 刚被改删）。
+     *
+     * <p>不能拿 {@link #KEY_SEQ} 当条数上界：清空记录后 seq 仍然只增，会一路涨过
+     * {@link #MAX_EVENTS}，那样「肯定没超」的短路就永远不成立，每张图又要全量解析一遍。
+     */
+    private static final AtomicInteger EVENT_COUNT = new AtomicInteger(-1);
 
     private final SharedPreferences prefs;
 
@@ -225,6 +252,11 @@ public final class RepeatCounter {
                     .putLong(KEY_SEQ, seq)
                     .putString(EVENT + seq, atMs + "|" + want + "|" + b + "|" + base)
                     .apply();
+            // 已校准过就跟着 +1；没校准过（-1）就继续留空，等下一次裁剪全扫校准
+            int knownEvents = EVENT_COUNT.get();
+            if (knownEvents >= 0) {
+                EVENT_COUNT.set(knownEvents + 1);
+            }
             trimEventsIfNeeded();
             return seq;
         } catch (Throwable t) {
@@ -361,6 +393,9 @@ public final class RepeatCounter {
      * ClassCastException，而调用方大多只 catch Throwable 兜底，
      * 结果就是整条台账静默消失、记录页退回合成的旧记录。
      * 这里统一按实际落盘的类型转换，读不懂才落默认值。
+     *
+     * <p>它走的是 {@code getAll()}，每次深拷贝整份 prefs（计数键 + 台账键可能近千条），
+     * 所以只在下面的直连快路径抛 ClassCastException 时才回落进来。
      */
     private Object rawOf(String key) {
         if (prefs == null) {
@@ -374,11 +409,37 @@ public final class RepeatCounter {
     }
 
     private String strOf(String key, String def) {
+        if (prefs == null) {
+            return def;
+        }
+        try {
+            // 快路径：直连单键。bump 一张图要读好几次，走 rawOf 就是每读一次深拷贝整份 map。
+            String v = prefs.getString(key, null);
+            return v == null ? def : v;
+        } catch (ClassCastException wrongType) {
+            // 键被写成别的类型时不炸，仍按实际落盘类型转换
+            return strOfSlow(key, def);
+        }
+    }
+
+    private String strOfSlow(String key, String def) {
         Object v = rawOf(key);
         return v == null ? def : String.valueOf(v);
     }
 
     private long longOf(String key, long def) {
+        if (prefs == null) {
+            return def;
+        }
+        try {
+            return prefs.getLong(key, def);
+        } catch (ClassCastException wrongType) {
+            return longOfSlow(key, def);
+        }
+    }
+
+    /** {@code getLong} 类型断言失败时的回落；语义与改前完全一致。 */
+    private long longOfSlow(String key, long def) {
         Object v = rawOf(key);
         if (v instanceof Number) {
             return ((Number) v).longValue();
@@ -397,6 +458,18 @@ public final class RepeatCounter {
     }
 
     private boolean boolOf(String key, boolean def) {
+        if (prefs == null) {
+            return def;
+        }
+        try {
+            return prefs.getBoolean(key, def);
+        } catch (ClassCastException wrongType) {
+            return boolOfSlow(key, def);
+        }
+    }
+
+    /** {@code getBoolean} 类型断言失败时的回落；语义与改前完全一致。 */
+    private boolean boolOfSlow(String key, boolean def) {
         Object v = rawOf(key);
         if (v instanceof Boolean) {
             return (Boolean) v;
@@ -411,17 +484,32 @@ public final class RepeatCounter {
         return def;
     }
 
-    /** 令牌变了就整体清空（含旧的 __reset），再把新令牌记下来。 */
+    /**
+     * 令牌变了就清掉计数表与台账（连同旧的 __reset），再把新令牌记下来；
+     * **唯一例外是 __seq：它必须留着继续往上走。**
+     *
+     * <p>原因不在本进程：模块 App 侧把用户的手工改 / 删动作持久保存成一批带序号的操作
+     * （{@code d|seq}、{@code l|seq|名字}），而它并不知道「清空」什么时候发生。
+     * 重置时若把 __seq 清零、新事件又从 1 开始编号，那么这批旧动作迟早在某次令牌变化后
+     * 被重新应用一遍，正好删掉 / 改掉同号的新事件 —— 用户看到的是「刚发的记录莫名消失」。
+     * 留着 seq 后，新事件序号恒大于历史动作里的序号，旧动作集自然伤不到它们
+     * （{@link #applyEdits} 找不到对应键就跳过）。
+     */
     private boolean applyResetIfNeeded(String resetToken) {
         String wanted = resetToken == null ? "" : resetToken;
         String applied = strOf(KEY_RESET, "");
         if (wanted.equals(applied)) {
             return false;
         }
+        // 先取再清：clear() 会把 __seq 一并抹掉
+        long seq = longOf(KEY_SEQ, 0L);
         prefs.edit()
                 .clear()
                 .putString(KEY_RESET, wanted)
+                .putLong(KEY_SEQ, seq)
                 .apply();
+        // 台账刚被整体清空，条数从此归零（不用等下一次全扫）
+        EVENT_COUNT.set(0);
         return true;
     }
 
@@ -450,6 +538,8 @@ public final class RepeatCounter {
         }
         ed.putLong(KEY_SEQ, seq);
         ed.apply();
+        // 迁移前账上还剩多少条不知道，标成未知：下一次裁剪全扫一遍校准
+        EVENT_COUNT.set(-1);
     }
 
     /** 解析全部计数键（不排序、不迁移）。 */
@@ -520,7 +610,10 @@ public final class RepeatCounter {
         }
         Map<String, Integer> maxN = new HashMap<>();
         Map<String, Long> lastAt = new HashMap<>();
-        for (Event ev : rawEvents()) {
+        List<Event> events = rawEvents();
+        // 这次解析是免费的校准点：改删之后再判断是否需要裁剪就不必重扫
+        EVENT_COUNT.set(events.size());
+        for (Event ev : events) {
             if (!labels.contains(ev.label)) {
                 continue;
             }
@@ -548,17 +641,26 @@ public final class RepeatCounter {
 
     /** 台账超过 {@link #MAX_EVENTS} 条时，按时间从旧到新删掉多出来的那些。 */
     private void trimEventsIfNeeded() {
+        // 已校准且没超上限就直接走，免掉「每张图把 ≤600 条台账全解析成 Event」这笔固定开销；
+        // 条数未知（进程刚起 / 刚迁移 / 刚被改删）才扫一次校准。
+        int known = EVENT_COUNT.get();
+        if (known >= 0 && known <= MAX_EVENTS) {
+            return;
+        }
         List<Event> all = rawEvents();
-        if (all.size() <= MAX_EVENTS) {
+        int size = all.size();
+        if (size <= MAX_EVENTS) {
+            EVENT_COUNT.set(size);
             return;
         }
         all.sort(Comparator.comparingLong(ev -> ev.at));
-        int excess = all.size() - MAX_EVENTS;
+        int excess = size - MAX_EVENTS;
         SharedPreferences.Editor ed = prefs.edit();
-        for (int i = 0; i < excess && i < all.size(); i++) {
+        for (int i = 0; i < excess && i < size; i++) {
             ed.remove(EVENT + all.get(i).seq);
         }
         ed.apply();
+        EVENT_COUNT.set(MAX_EVENTS);
     }
 
     /** {@code "<次数>|<时间戳>"} 里的次数；解析不出来一律当 0。 */
@@ -588,6 +690,11 @@ public final class RepeatCounter {
 
     /** 超过 [MAX_ENTRIES] 条时，按时间戳从旧到新删掉多出来的那些。 */
     private void trimIfNeeded() {
+        // 每 TRIM_EVERY 次才真扫一次：计数从 0 起、首调必命中，进程重启后的第一张图
+        // 仍会把自己/外部写超限的数据裁掉，之后最多多留 TRIM_EVERY-1 条，软上限照旧。
+        if (TRIM_TICK.getAndIncrement() % TRIM_EVERY != 0) {
+            return;
+        }
         Map<String, ?> all = prefs.getAll();
         int count = 0;
         for (String key : all.keySet()) {

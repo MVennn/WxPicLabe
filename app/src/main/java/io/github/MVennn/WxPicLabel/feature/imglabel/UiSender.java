@@ -9,10 +9,16 @@ import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import io.github.MVennn.WxPicLabel.core.GLog;
+
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 用纯 Android 视图层把文字发进当前聊天。
@@ -27,16 +33,26 @@ public final class UiSender {
     private static final String[] SEND_TEXTS = {"发送", "Send"};
     private static final int MAX_DEPTH = 40;
 
-    /** 前几次失败时把 View 树打进日志，用于校准选择器。 */
-    private static int dumpsLeft = 3;
+    /**
+     * 前几次失败时把 View 树打进日志，用于校准选择器。
+     *
+     * <p>递减发生在点击失败分支，而重试是异步续排的：非原子计数在并发下会把「还剩几次」判歪，
+     * 多打出几十行 vtree（主线程上每行都是一次全树递归 + 拼串）。
+     */
+    private static final AtomicInteger dumpsLeft = new AtomicInteger(3);
 
     /** true = 不看 isShown（后台聊天页的 View 全部 isShown()==false，但照样能 setText/点发送）。 */
     private static boolean LOOSE;
 
-    /** setText 之后等多久点「发送」（毫秒，由模块按属性调整）。 */
-    public static int preClickMs = 120;
-    /** 点完「发送」后等多久收尾（毫秒）。 */
-    public static int postClickMs = 200;
+    /**
+     * setText 之后等多久点「发送」（毫秒，由模块按属性调整）。
+     *
+     * <p>模块侧在接管线程写、主线程每条消息读：不加 volatile 时主线程可能一直看到旧值
+     * （字段被提到循环外），表现就是改了配置不生效。类型仍然是 int。
+     */
+    public static volatile int preClickMs = 120;
+    /** 点完「发送」后等多久收尾（毫秒，与 {@link #preClickMs} 同理：模块侧跨线程写）。 */
+    public static volatile int postClickMs = 200;
 
     /** 队列元素：文案 + 发完后的回调（用于放行被闸住的下一张图）。 */
     private static final class Item {
@@ -116,21 +132,32 @@ public final class UiSender {
         Item item;
         synchronized (QUEUE) {
             item = QUEUE.peek();
+            if (item == null || ui == null) {
+                // 「看到空队列 → 关 draining」必须和这次 peek 在同一个临界区里完成。
+                // 挪到锁外会留下这个交错：send() 恰好在 peek 之后入队、看到 draining==true
+                // 便不再调度，这边紧接着把 draining 关掉并 return —— 那条 Item 永远没人 step，
+                // done 不执行，调用方 sendLabel 的 latch 每张图白等 10 秒。
+                draining = false;
+                retries = 0;
+                return;
+            }
         }
-        String content = item == null ? null : item.content;
-        if (content == null || ui == null) {
-            draining = false;
-            retries = 0;
-            return;
-        }
-        Activity top = currentActivity();
+        String content = item.content;
         Activity act = cachedAct.get();
         View root = cachedRoot.get();
         EditText et = cachedEt.get();
-        boolean fast = et != null && root != null && act != null
+        boolean alive = et != null && root != null && act != null
                 && !act.isFinishing()
-                && et.isAttachedToWindow() && root.isAttachedToWindow()
-                && (cachedLoose || act == top);
+                && et.isAttachedToWindow() && root.isAttachedToWindow();
+        // 后台聊天页那一档（cachedLoose）的判据里没有「act == top」，先按它命中：
+        // 每条文字消息就这样省掉一次 currentActivity()（进程内 3 次反射 lookup + 遍历整张活动表），
+        // 只有快路径没命中时才去问前台是谁。
+        boolean fast = alive && cachedLoose;
+        Activity top = null;
+        if (!fast) {
+            top = currentActivity();
+            fast = alive && act == top;
+        }
         if (fast) {
             LOOSE = cachedLoose;
         } else {
@@ -159,11 +186,15 @@ public final class UiSender {
                 cachedSend = new WeakReference<>(null);
             }
         }
-        Log.i(TAG, "ui-send: act=" + (act == null ? "null" : act.getClass().getName())
-                + " edit=" + (et == null ? "null" : et.getClass().getName())
-                + " loose=" + LOOSE
-                + " fast=" + fast
-                + " content=" + shorten(content));
+        // 这行每条消息都要跑：4 次 getName() + 拼串是主线程上的实打实分配，INFO 档下没人看。
+        // 先问一句再拼，判据本身只是一次 volatile 读。
+        if (GLog.INSTANCE.isDebug()) {
+            Log.i(TAG, "ui-send: act=" + (act == null ? "null" : act.getClass().getName())
+                    + " edit=" + (et == null ? "null" : et.getClass().getName())
+                    + " loose=" + LOOSE
+                    + " fast=" + fast
+                    + " content=" + shorten(content));
+        }
         if (et == null) {
             // 相册刚返回时前台可能短暂为空，等界面回来再发（最多 ~9 秒）
             if (++retries <= 30) {
@@ -179,7 +210,7 @@ public final class UiSender {
                 dropped = QUEUE.poll();
             }
             if (dropped != null && dropped.done != null) {
-                dropped.done.run();
+                runDone(dropped.done);
             }
             retries = 0;
             ui.postDelayed(UiSender::step, 150L);
@@ -230,7 +261,7 @@ public final class UiSender {
         boolean ok = clickSend(root, et);
         Log.i(TAG, "ui-send: click=" + ok + " in " + (SystemClock.uptimeMillis() - start)
                 + "ms content=" + shorten(content));
-        if (!ok && dumpsLeft-- > 0) {
+        if (!ok && dumpsLeft.getAndDecrement() > 0) {
             dump(root, 0, new StringBuilder());
         }
         finish(ok, et);
@@ -243,10 +274,24 @@ public final class UiSender {
             finished = QUEUE.poll();
         }
         if (finished != null && finished.done != null) {
-            finished.done.run();
+            runDone(finished.done);
         }
         long deadline = SystemClock.uptimeMillis() + Math.max(0, postClickMs);
         awaitInputCleared(et, deadline);
+    }
+
+    /**
+     * 跑调用方的完成回调，抛了也要让队列继续往下走。
+     *
+     * <p>done 用来放行被闸住的下一张图，跑在微信主线程上：裸调等于把调用方的一个异常
+     * 放大成整条发送链中断 —— 后面的 awaitInputCleared / step 都排不上，界面永远停在当前这条。
+     */
+    private static void runDone(Runnable done) {
+        try {
+            done.run();
+        } catch (Throwable t) {
+            Log.w(TAG, "ui-send: done callback failed", t);
+        }
     }
 
     /**
@@ -336,24 +381,19 @@ public final class UiSender {
         return null;
     }
 
-    /** ActivityThread.mActivities 的全部记录（前台后台都在里面）。 */
-    private static java.util.List<Object> activityRecords() {
-        java.util.List<Object> out = new java.util.ArrayList<>();
-        try {
-            Class<?> at = Class.forName("android.app.ActivityThread");
-            Method current = at.getDeclaredMethod("currentActivityThread");
-            current.setAccessible(true);
-            Object thread = current.invoke(null);
-            Field fa = at.getDeclaredField("mActivities");
-            fa.setAccessible(true);
-            Map<?, ?> map = (Map<?, ?>) fa.get(thread);
-            if (map != null) {
-                out.addAll(map.values());
-            }
-        } catch (Throwable t) {
-            Log.i(TAG, "ui-send: activityRecords failed: " + t);
+    /**
+     * ActivityThread.mActivities 的全部记录（前台后台都在里面）。
+     *
+     * <p>反射三件套走静态缓存（见 [activityMap]），这里只剩一次 map 取值。
+     * 返回的是活动表的活视图而不是拷贝：唯一调用方只做只读遍历，而几个页面同时存活时
+     * 每轮一次的 ArrayList 扩容纯属白给；取不到时返回空集合，与原来的空列表等价。
+     */
+    private static Collection<?> activityRecords() {
+        Map<?, ?> map = activityMap("activityRecords");
+        if (map == null) {
+            return Collections.emptyList();
         }
-        return out;
+        return map.values();
     }
 
     /** 不看可见性找输入框：只认 EditText 且宽度 > 0。 */
@@ -410,13 +450,7 @@ public final class UiSender {
      */
     private static Activity currentActivity() {
         try {
-            Class<?> at = Class.forName("android.app.ActivityThread");
-            Method current = at.getDeclaredMethod("currentActivityThread");
-            current.setAccessible(true);
-            Object thread = current.invoke(null);
-            Field fa = at.getDeclaredField("mActivities");
-            fa.setAccessible(true);
-            Map<?, ?> map = (Map<?, ?>) fa.get(thread);
+            Map<?, ?> map = activityMap("currentActivity");
             if (map == null) {
                 return null;
             }
@@ -438,11 +472,92 @@ public final class UiSender {
         }
     }
 
-    private static Object readField(Object target, String name) {
+    // ------------------------------------------------------------ 反射元数据缓存
+
+    /*
+     * ActivityThread 的三件套（类 / currentActivityThread / mActivities）。
+     *
+     * 这几个 lookup 原来是每条文字消息都重来一遍：Class.forName 要过一遍类加载器缓存，
+     * getDeclaredMethod / getDeclaredField 走的是类元数据查找（比 Method.invoke 本身贵得多），
+     * 而它们在同一个进程里不可能变（框架类不混淆、字段名固定）。
+     * 只缓存解析成功的结果；解析失败保持原样，由调用方照旧退化成「取不到界面」。
+     */
+    private static volatile Class<?> atClass;
+    private static volatile Method atCurrent;
+    private static volatile Field atActivities;
+
+    /*
+     * ActivityClientRecord 的字段按「记录类 + 字段名」缓存。
+     * 记录类在进程内只有一种，缓存之后每条记录只剩一次 Field.get；
+     * 原来是每步、每条记录各做一次 getDeclaredField + setAccessible。
+     */
+    private static final ConcurrentHashMap<Class<?>, ConcurrentHashMap<String, Field>> RECORD_FIELDS =
+            new ConcurrentHashMap<>();
+
+    /**
+     * ActivityThread.mActivities 的活引用。
+     *
+     * @param who 只用来还原原来的日志文案（currentActivity / activityRecords）
+     * @return 反射失败或取不到返回 null，调用方按原逻辑退化为「没有界面 / 空集合」
+     */
+    private static Map<?, ?> activityMap(String who) {
         try {
-            Field f = target.getClass().getDeclaredField(name);
-            f.setAccessible(true);
+            Class<?> at = atClass;
+            if (at == null) {
+                at = Class.forName("android.app.ActivityThread");
+                atClass = at;
+            }
+            Method current = atCurrent;
+            if (current == null) {
+                current = at.getDeclaredMethod("currentActivityThread");
+                current.setAccessible(true);
+                atCurrent = current;
+            }
+            Field fa = atActivities;
+            if (fa == null) {
+                fa = at.getDeclaredField("mActivities");
+                fa.setAccessible(true);
+                atActivities = fa;
+            }
+            Object thread = current.invoke(null);
+            return thread == null ? null : (Map<?, ?>) fa.get(thread);
+        } catch (Throwable t) {
+            Log.i(TAG, "ui-send: " + who + " failed: " + t);
+            return null;
+        }
+    }
+
+    private static Object readField(Object target, String name) {
+        Field f = recordField(target.getClass(), name);
+        if (f == null) {
+            return null;
+        }
+        try {
             return f.get(target);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 记录字段的缓存化 lookup；字段名对不上就返回 null，调用方照旧当成「没有这个字段」。 */
+    private static Field recordField(Class<?> cls, String name) {
+        ConcurrentHashMap<String, Field> byName = RECORD_FIELDS.get(cls);
+        if (byName == null) {
+            byName = new ConcurrentHashMap<>();
+            ConcurrentHashMap<String, Field> prev = RECORD_FIELDS.putIfAbsent(cls, byName);
+            if (prev != null) {
+                byName = prev;
+            }
+        }
+        Field f = byName.get(name);
+        if (f != null) {
+            return f;
+        }
+        try {
+            f = cls.getDeclaredField(name);
+            f.setAccessible(true);
+            byName.put(name, f);
+            return f;
         } catch (Throwable t) {
             return null;
         }
@@ -531,24 +646,44 @@ public final class UiSender {
         return null;
     }
 
+    /**
+     * findRightOfInput 的复用缓冲。
+     *
+     * <p>一次兜底查找要遍历整棵树：原先是每个节点都 new int[2] 再对输入框 getLocationOnScreen，
+     * 而输入框坐标在同一趟遍历里不会变（期间没有 layout pass），提到最外层算一次就够。
+     * 注意 loc 只是「写下就立刻读走」的临时格，绝不能跨递归层保存 —— 子节点会把值踩掉。
+     */
+    private static final class RowScan {
+        final int[] loc = new int[2];
+        final int etTop;
+        final int etRight;
+        final int etBottom;
+
+        RowScan(EditText et) {
+            et.getLocationOnScreen(loc);
+            etTop = loc[1];
+            etRight = loc[0] + et.getWidth();
+            etBottom = etTop + et.getHeight();
+        }
+    }
+
     /** 兜底：与输入框同一行、在它右侧、可点击的最近节点。 */
     private static View findRightOfInput(View v, EditText et, int depth) {
+        // 缓冲和输入框几何只建一次，递归内部不再分配
+        return findRightOfInput(v, et, depth, new RowScan(et));
+    }
+
+    private static View findRightOfInput(View v, EditText et, int depth, RowScan row) {
         if (v == null || depth > MAX_DEPTH || (!LOOSE && !v.isShown())) {
             return null;
         }
-        int[] loc = new int[2];
-        et.getLocationOnScreen(loc);
-        int etLeft = loc[0];
-        int etTop = loc[1];
-        int etBottom = etTop + et.getHeight();
         View best = null;
         int bestDist = Integer.MAX_VALUE;
         if (v.isClickable() && v != et && v.isEnabled()) {
-            int[] l = new int[2];
-            v.getLocationOnScreen(l);
-            boolean sameRow = l[1] < etBottom && l[1] + v.getHeight() > etTop;
-            if (sameRow && l[0] >= etLeft + et.getWidth() - 8) {
-                int dist = l[0] - (etLeft + et.getWidth());
+            v.getLocationOnScreen(row.loc);
+            boolean sameRow = row.loc[1] < row.etBottom && row.loc[1] + v.getHeight() > row.etTop;
+            if (sameRow && row.loc[0] >= row.etRight - 8) {
+                int dist = row.loc[0] - row.etRight;
                 if (dist < bestDist) {
                     bestDist = dist;
                     best = v;
@@ -560,13 +695,13 @@ public final class UiSender {
         }
         ViewGroup g = (ViewGroup) v;
         for (int i = 0; i < g.getChildCount(); i++) {
-            View c = findRightOfInput(g.getChildAt(i), et, depth + 1);
+            View c = findRightOfInput(g.getChildAt(i), et, depth + 1, row);
             if (c == null) {
                 continue;
             }
-            int[] l = new int[2];
-            c.getLocationOnScreen(l);
-            int dist = l[0] - (etLeft + et.getWidth());
+            // 递归回来缓冲区里是子节点写过的坐标，本节点的必须重取
+            c.getLocationOnScreen(row.loc);
+            int dist = row.loc[0] - row.etRight;
             if (best == null || dist < bestDist) {
                 bestDist = dist;
                 best = c;

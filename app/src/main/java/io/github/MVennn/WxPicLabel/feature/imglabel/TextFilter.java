@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Pattern;
 
 /**
  * 文字过滤（黑白名单）：决定「这一张图要不要带文字发出去」。
@@ -56,8 +55,6 @@ public final class TextFilter {
     /** 黑名单：命中的图不发文字 */
     public static final int MODE_BLACKLIST = 2;
 
-    private static final int CASE_FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
-
     private TextFilter() {
     }
 
@@ -87,28 +84,24 @@ public final class TextFilter {
 
         private final boolean ignoreCase;
 
-        /** 通配规则的编译结果；不含通配符时为 null */
-        private final Pattern wildcard;
+        /** 通配规则（需要折叠时已折叠）；不含通配符时为 null */
+        private final String glob;
 
         Rule(String source, boolean ignoreCase) {
             this.source = source;
             this.ignoreCase = ignoreCase;
             this.keyword = ignoreCase ? source.toLowerCase(Locale.ROOT) : source;
-            boolean glob = source.indexOf('*') >= 0 || source.indexOf('?') >= 0;
-            this.wildcard = glob
-                    ? Pattern.compile(globToRegex(source), ignoreCase ? CASE_FLAGS : 0)
-                    : null;
+            boolean wild = source.indexOf('*') >= 0 || source.indexOf('?') >= 0;
+            // 通配也一并折叠：判定时只折文本一次，见 find
+            this.glob = wild ? keyword : null;
         }
 
+        /** 判定一段**已按需折叠**的文本（由 {@link #find} 负责折叠，避免每条规则各折一遍）。 */
         boolean matches(String text) {
             if (text == null || text.isEmpty()) {
                 return false;
             }
-            if (wildcard != null) {
-                return wildcard.matcher(text).matches();
-            }
-            String t = ignoreCase ? text.toLowerCase(Locale.ROOT) : text;
-            return t.contains(keyword);
+            return glob != null ? globMatches(glob, text) : text.contains(keyword);
         }
     }
 
@@ -147,12 +140,27 @@ public final class TextFilter {
         if (rules == null || rules.isEmpty() || texts == null) {
             return null;
         }
+        // 同一段文本只折一次大小写：改前是「每条规则 × 每段文本」各折一遍，
+        // 名单几十条时同一个文件名会被反复 toLowerCase 几十次。
+        String[] folded = new String[texts.length];
+        boolean[] foldedDone = new boolean[texts.length];
         for (Rule r : rules) {
-            for (CharSequence t : texts) {
+            for (int i = 0; i < texts.length; i++) {
+                CharSequence t = texts[i];
                 if (t == null) {
                     continue;
                 }
-                if (r.matches(t.toString())) {
+                String s;
+                if (r.ignoreCase) {
+                    if (!foldedDone[i]) {
+                        folded[i] = t.toString().toLowerCase(Locale.ROOT);
+                        foldedDone[i] = true;
+                    }
+                    s = folded[i];
+                } else {
+                    s = t.toString();
+                }
+                if (r.matches(s)) {
                     return r;
                 }
             }
@@ -171,22 +179,47 @@ public final class TextFilter {
         return true;
     }
 
-    /** 把星号 / 问号通配转成整段匹配的正则；其余字符逐个转义。 */
-    private static String globToRegex(String glob) {
-        StringBuilder sb = new StringBuilder(glob.length() + 16);
-        for (int i = 0; i < glob.length(); i++) {
-            char c = glob.charAt(i);
-            if (c == '*') {
-                sb.append(".*");
-            } else if (c == '?') {
-                sb.append('.');
-            } else {
-                if ("\\.[]{}()+-^$|".indexOf(c) >= 0) {
-                    sb.append('\\');
+    /**
+     * 整段通配匹配（{@code *} = 任意多个字，{@code ?} = 一个字）。
+     *
+     * <p>为什么不用正则：早前把规则译成 {@code .*} / {@code .} 再 {@code matches()}，
+     * 而 {@code *a*a*a*a*a*a*b} 这种名单会让回溯爆炸 —— 判一条文件名就能把微信进程的
+     * Binder 线程卡住（用户自己写的名单，等于自带一个卡死入口）。
+     * 这里是经典的「记住上一个星号位置」线性扫描：最坏 O(长度×星号数)，没有回溯。
+     *
+     * <p>输入永远是文件名（不含换行），所以不像正则那样额外把换行排除在 {@code .} 之外。
+     */
+    private static boolean globMatches(String glob, String text) {
+        int g = 0;
+        int t = 0;
+        int star = -1;
+        int mark = 0;
+        int gl = glob.length();
+        int tl = text.length();
+        while (t < tl) {
+            if (g < gl) {
+                char gc = glob.charAt(g);
+                if (gc == '?' || gc == text.charAt(t)) {
+                    g++;
+                    t++;
+                    continue;
                 }
-                sb.append(c);
+                if (gc == '*') {
+                    star = g++;
+                    mark = t;
+                    continue;
+                }
             }
+            if (star < 0) {
+                return false;
+            }
+            // 回退到上一个星号，让它多吃一个字再比
+            g = star + 1;
+            t = ++mark;
         }
-        return sb.toString();
+        while (g < gl && glob.charAt(g) == '*') {
+            g++;
+        }
+        return g == gl;
     }
 }

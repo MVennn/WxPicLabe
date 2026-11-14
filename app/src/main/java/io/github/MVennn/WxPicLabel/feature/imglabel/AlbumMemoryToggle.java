@@ -522,14 +522,33 @@ public final class AlbumMemoryToggle {
         return chatTalkerFromActivities();
     }
 
+    /** {@code ActivityThread#currentActivityThread} / {@code mActivities} 的静态缓存（取不到不缓存）。 */
+    private static volatile Method currentActivityThread;
+    private static volatile Field activitiesField;
+
+    /** ActivityClientRecord 取 getActivity 的按类缓存；查不到记哨兵，别每次逐条抛异常。 */
+    private static final java.util.concurrent.ConcurrentHashMap<Class<?>, Object> ACTIVITY_GETTERS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 哨兵：这一类没有可用的 {@code getActivity()}。 */
+    private static final Object NO_GETTER = new Object();
+
     /** 扫 ActivityThread.mActivities：还活着的聊天页 Intent 里带 Chat_User。 */
     private static String chatTalkerFromActivities() {
         try {
-            Class<?> at = Class.forName("android.app.ActivityThread");
-            Method m = at.getDeclaredMethod("currentActivityThread");
-            Object thread = m.invoke(null);
-            Field f = at.getDeclaredField("mActivities");
-            f.setAccessible(true);
+            // 每开一次相册都要走这里，而 Class.forName + getDeclaredMethod/getDeclaredField
+            // 三次反射都在主线程上。类与成员在进程内不会变，取到就留着。
+            Method cur = currentActivityThread;
+            Field f = activitiesField;
+            if (cur == null || f == null) {
+                Class<?> at = Class.forName("android.app.ActivityThread");
+                cur = at.getDeclaredMethod("currentActivityThread");
+                f = at.getDeclaredField("mActivities");
+                f.setAccessible(true);
+                currentActivityThread = cur;
+                activitiesField = f;
+            }
+            Object thread = cur.invoke(null);
             Object map = f.get(thread);
             if (!(map instanceof java.util.Map)) {
                 return null;
@@ -540,8 +559,20 @@ public final class AlbumMemoryToggle {
                     continue;
                 }
                 try {
-                    Method ga = rec.getClass().getMethod("getActivity");
-                    Object a = ga.invoke(rec);
+                    Class<?> recClass = rec.getClass();
+                    Object cached = ACTIVITY_GETTERS.get(recClass);
+                    if (cached == null) {
+                        try {
+                            cached = recClass.getMethod("getActivity");
+                        } catch (Throwable t) {
+                            cached = NO_GETTER;
+                        }
+                        ACTIVITY_GETTERS.put(recClass, cached);
+                    }
+                    if (cached == NO_GETTER) {
+                        continue;
+                    }
+                    Object a = ((Method) cached).invoke(rec);
                     if (!(a instanceof Activity)) {
                         continue;
                     }
