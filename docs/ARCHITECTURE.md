@@ -12,6 +12,7 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
 │   └── RepeatCounter.java   #   同名图片计数（落在微信自己的 SharedPreferences）
 ├── core/                    # 两进程共用、且**不依赖宿主**的基础设施
 │   ├── ConfigKeys.kt        #   配置键与默认值的唯一来源
+│   ├── BridgeProtocol.kt    #   跨进程回传协议的 authority / path / 载荷版本（唯一来源）
 │   ├── GLog.kt / LogStore.kt / LogExporter.kt   # 日志等级、落盘、导出
 ├── app/                     # 模块**自身进程**（设置页那个进程）
 │   ├── WxPicApp.kt          #   Application：初始化配置、日志、框架服务
@@ -89,9 +90,17 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
 - 「清空发送记录」和「编辑记录」都是**单向令牌**：设置页写毫秒时间戳，微信进程轮询到变化才动手——
   清空整体重来，编辑把动作串重放一遍（幂等），改完按台账剩余最大次数反推聚合表。
 - **发送记录回传**走令牌 `img_label_record_dump`：微信进程把「聚合表 + 台账 + 已应用编辑」拼成一份
-  JSON 文档，按**字符**切成 ≤3000 字的片经 `/records` 送过去（Provider 只按序拼接、**不加外壳**；
-  `/friends` 走的是 200 条一片的另一套协议），模块 App 的 `RecordStore` 落盘、「发送记录」页展示。
-  每批发完也会推一份。
+  JSON 文档（顶层带 `"v"` 载荷版本与 `"at"` 生成时间），按**字符**切成 ≤3000 字的片经 `/records` 送过去
+  （Provider 只按序拼接、**不加外壳**），模块 App 的 `RecordStore` 落盘、「发送记录」页展示。每批发完也会推一份。
+  `/friends` 走的是 200 条一片的另一套协议，外壳（`v` / `fetchedAt` / `friends`）由 Provider 在末片自己拼。
+- **协议常量只有一个来源**：`core/BridgeProtocol.kt` 定义 authority、三个 path 与 `SCHEMA`；
+  读侧看到 `v > SCHEMA` 时按 lenient 解析并把 `path` 标成 `unsupported`（**能读多少读多少，不整份丢弃**），
+  键名不随版本改名 —— 加版本只加在载荷里，跨模块靠 TAG 区分。
+- **`/status` 是只读探针**：`schema` / `module`（版本名）/ `features` / `last_records_at` / `last_friends_at` /
+  `records_chars` / `friends_count`。老版本 Provider 对任意 path 都回 `friends_json` 那三列，
+  新调用方读到 `friends_json` 即判「没有 /status 能力」，不需要额外握手。复用同一套 UID 白名单（root / shell / 微信 / 本模块）。
+- **两条回传的重试口径一致**：记录与好友名单都按 `min(60s, 5s × (1+失败次数))` 退避，失败不落盘半份快照
+  （分片 `insert` 返回 null 就整份放弃），模块 App 侧不需要点「刷新」。
 
 ## 降级策略
 

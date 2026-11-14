@@ -139,13 +139,14 @@
 - **只筛文字，不筛图片**：被过滤的图照样按原顺序发出去，只是没有那一行名字。本功能不做「跳过某张图」。
 - 判定用的是发送那一刻的最终文字：发完再改重命名规则或关键字表，不会回溯已经发出去的东西。
 - 通配是整段匹配，`Screenshot*` 不会命中 `my Screenshot_1`。
+- 通配不走正则：匹配是双指针 + 回溯点，最坏 O(文本长度 × 星号数)。早期版本编译成正则再 `matches()`，用户填 `*a*a*a*a*b` 这类形状会指数回溯、把微信卡到 ANR（`docs/PITFALLS.md` §30）。
 - 一次判定最多 2 段文本 × N 条规则，且每张图每批只判一次（结果进 `batchTexts` 缓存），几百条关键字也不影响发送节奏。
 
 ## 11. 单测
 
-`app/src/test/java/io/github/MVennn/WxPicLabel/feature/imglabel/TextFilterTest.kt` 覆盖 12 条：
+`app/src/test/java/io/github/MVennn/WxPicLabel/feature/imglabel/TextFilterTest.kt` 覆盖 14 条：
 模式解析与回落、注释与空行、空表、子串命中、大小写开关、`*` / `?` 通配、关键字里的正则元字符、三种模式的放行结果、
-空表不吞批、空文本不算命中。纯 JVM 跑，不需要设备：
+空表不吞批、空文本不算命中、通配跨星号的先后顺序、病态通配（`"*a"×12 + "*b"` 对 60 个 `a`）不命中且 2 秒内出结果。纯 JVM 跑，不需要设备：
 
 ```cmd
 build.cmd :app:testReleaseUnitTest

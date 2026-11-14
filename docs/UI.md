@@ -208,7 +208,7 @@ SettingsActivity
    「拆成多张卡 + 行本身的高度」。判断依据是「这个仓里别的页面有没有」—— 全仓唯一的分隔线曾在黑白名单页出现
    （0.5dp、`start = 16.dp`，从卡内缩进处起笔像一条分叉），被明确否掉（2026-11）。
    需要把「列表」和「动作行」分开时，拆成两张 `Card(modifier = Modifier.cardPadding())`，卡与卡之间补一行
-   `Spacer(Modifier.height(12.dp))` —— 这是本仓既有口径（`ImgLabelRecordScreen.kt:517`、`:587`），不补就会贴成一整块。
+   `Spacer(Modifier.height(12.dp))` —— 这是本仓既有口径（`ImgLabelRecordScreen.kt:606`、`:700`），不补就会贴成一整块。
 10. **输入框只有两种**：页内搜索走 `AppSearchField`（§9），弹层输入走 `TextInputDialogSpec`。
     别在页面里直接写 `BasicTextField` —— 各写各的会漏 `cursorBrush`（深色主题下光标纯黑看不见）、漏 `ImeAction.Search`，
     内边距与字号也会各飘各的（2026-11 记录页与选择会话页就是三份分叉实现）。

@@ -138,6 +138,17 @@
 只读行点击 → `ConfirmDialogSpec` 说明卡（`cancelText = ""` 时只画一颗按钮）。两种都是原地弹窗，
 所以两种行都画朝下箭头（`docs/UI.md` §4）。
 
+### 列表实现（2026-11 换成 `LazyColumn`）
+
+整页是一个 `LazyColumn` + 扁平行：组头、组内的一行、组与组之间的 12dp 各算一个 item（`RecordRow` 三个子类型），
+600 条台账进页面只组合可见的十几行，展开一组的开销与总条数无关。
+
+- **item key = 组键 + 组内下标 + `seq`**（`buildRecordRows` 里现算）。不能只用 `seq`：迁移条目的 `seq` 恒为 0，
+  同组两条就会撞 key，`LazyColumn` 撞 key 直接抛异常白屏（`docs/PITFALLS.md` §33）。
+- 组卡横跨多个 item，背景与圆角由 `GroupCardSlice` 逐段自绘：首段圆上两角、末段圆下两角，
+  中段只铺底色（圆角为 0 时 squircle 着色器本来就返回纯色，省一层离屏合成）。
+- `openKeys` / 扁平行表 / 时间下界都在 `remember` 里，滚动引起的重组不再重算这些。
+
 ## 排障
 
 | 现象 | 先看什么 |

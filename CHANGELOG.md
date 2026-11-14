@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- 优化 发图热路径不再整份拷贝计数台账（2026-11-14）：`RepeatCounter` 每张图要走 4 次 `SharedPreferences.getAll()`（`rawOf` 每次把 300+ 条台账与 600 条事件全拷成新 map 再取一个键，连发 50 张约 7MB 临时对象），`trimEventsIfNeeded` 还会把 ≤600 条事件无条件解析成 `Event`。现在 `strOf` / `longOf` / `boolOf` 直连 `getString` / `getLong` / `getBoolean`（类型写错仍回落原实现，防御不变），裁剪改成进程内已校准计数短路、每 16 次计数才真扫一遍；`__seq` 改为清空记录时保留不重置，供序号不复用与 `applyEdits` 判重依赖
+- 优化 接管批次改「每批一份入口上下文 + CAS 独占位」：原来入口 `Method` / `this` / 参数存在三个 `volatile` 字段里，跨批共享，第二张图并发拦进来会把上一批的入口覆盖掉（重放的是别人的图）。现在每批建 `ReplayCtx` 挂 `ThreadLocal`，并用 `AtomicBoolean` 抢独占位；抢不到不是丢文字，而是转兜底队列排队补发
+- 优化 拦截线程不再等跨进程 binder 读配置：`cfgPrefs()` 的 3s TTL 到期改为把重附着 hop 到 `wxpiclabel-poller` 线程、本次调用继续用旧快照（拿不到就沿用上一次，仍 fail-closed）；`scopeAllowed` 每张图只取一次 prefs 快照，作用域名单按「附着时间戳 + key」缓存，不再每次 `getStringSet` 新拷一份；`labelOf(String)` 去掉 `new File(path).getName()`，`resolveContentUri` 加 `LruCache(64)`
+- 修复 单张图静默丢文件名（`UiSender` 丢唤醒）：`step()` 在 `synchronized (QUEUE)` 内 peek 到空队列，却在锁外把 `draining` 置回 false —— 主干此时看到 `draining == true` 不再调度，`sendLabel` 的 `latch.await(10s)` 白等 10 秒后按失败收场。现在「空队列 → 关 draining」搬进同一个临界区；顺带把逐条消息都要走的三件套反射改成静态缓存、诊断 `Log.i` 收进 `GLog.isDebug()` 门控、`findRightOfInput` 的 `int[2]` 改复用
+- 修复 钩子可能把微信带崩或永久失效：`on5.f#a` 只按名字与参数类型定位，从不校验返回值，若某版本不是 `void` 就直接 `return null` 让宿主拆箱 NPE；`markHooked` 又全部写在 `hook()` 之前，类没找到 / 反射失败也照样标记，之后永远不再尝试（相册底栏开关就此消失）。现在非 `void` 直接跳过并打日志，标记一律后置到挂载成功之后，拦截回调体整体包 `try/catch`
+- 修复 连发两批图时兜底队列串批 / 吞文字：`pendingDrafts` 只有一份全局状态，`armFromParams` / `armDeferred` / 接管批末三处各自整表替换 —— 队列补发到第 i 格时被换成新批，`pendingIndex` 仍是 i，新批前 i 格就被当成「已发过」跳过；接管批末又无条件 `pendingDrafts = null`，把接管期间排进来的下一批一起清掉。现在消费前校验「手里这份还是不是当前表」、新批追加到队尾且不重置序号、批末不再清别人的队列（本批文字在 `startReplay` 开头已取走）
+- 修复 用户随手填的通配规则能卡死微信进程：`TextFilter` 把通配编译成正则再 `matches()`，`*a*a*a*a*b` 这种形状在几十个字符上就指数回溯。现在改成双指针 + 回溯点匹配（最坏 O(长度 × 星号数)，无正则回溯），文本侧大小写折叠每段只做一次；`TextFilterTest` 加两条回归（顺序语义 + 病态模式 2 秒上限）
+- 新增 跨进程回传协议收口到 `core/BridgeProtocol.kt` 单一常量源，并加只读探针 `/status`（schema / 模块版本 / features / 两条回传的时间与规模共八列）；records 与 friends 载荷统一带 `v` 与 `at`，读侧 `v > SCHEMA` 走 lenient 解析并标 `unsupported` 而不是猜结构。好友回传补上退避重试（与记录回传同口径 `min(60s, 5s × (1 + 失败次数))`），分片 `insert` 返回 null 就整份放弃；Provider 加 `MAX_CHUNKS` / `MAX_CHUNK_CHARS` 闸门，末片改按前缀清扫残留分片（原来只清 `0..total-1`，上一批更长时高位分片永久残留）
+- 优化 发送记录页从 `verticalScroll + 双层 for` 换成 `LazyColumn` 扁平行：600 条台账原来首帧就把每一行都组合、测量一遍（每行还各挂一个 `remember` 锚点 + `onGloballyPositioned`），现在只组合可见的十几行，展开一组的开销与总行数无关；`openKeys` / 扁平行表 / 时间下界都进 `remember`，滚动引起的重组不再重算这些。组卡横跨多个 item，按「首段圆上两角 / 中段直边 / 末段圆下两角」逐段自绘，圆角与底色仍取 `CardDefaults.CornerRadius` / `defaultColors()`（`insideMargin` 实测为 0dp，所以切片与整卡逐像素一致）
+- 优化 UI 帧路径减分配：概览卡光场每帧的两次 `map` + `listOf` + `forEachIndexed` 换成局部 `val` 与直调（每帧少 8–10 个短命对象），卡片滚出屏幕或窗口不在 `STARTED` 时不再累加时间、不触发重绘；概览卡的横滑让位跟着走同一判据
+- 修复 日志导出的 `StringBuilder` 并发写：读线程拼一段、调用线程 `toString()`，读线程 `join(1000)` 超时后仍在 append，导出内容可能被截断。现在读写都在同一个锁里
+
 ## [0.8.2] - 2026-11-13
 
 - 优化 构建 `debug` 变体默认按「性能」构建（2026-11-13）：`isDebuggable = false` + `isMinifyEnabled` + `isShrinkResources`，与 `release` 共用同一套 `app/proguard-rules.pro`。此前 debug 包 `debuggable=true`，ART 不做 AOT、Compose 的 lambda 未内联，实机左右切页明显掉帧 —— 这也是本仓「只出 release」的由来；现在 debug 变体同样能测出真实流畅度。要断点 / `run-as` / 可读混淆栈时用 `gradlew :app:assembleDebug -Pwx.debuggable=true -Pwx.minifyDebug=false` 退回（`docs/BUILD.md` §2.1）

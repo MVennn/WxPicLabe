@@ -168,3 +168,27 @@
 - **现象**：微信里发完图片后上滑消息列表、点开相册或切换会话时间歇掉帧；把模块「增加 文件名」总开关保持出厂关闭也一样。发图那一下「发送」转圈变久，多图连发更明显。`adb shell dumpsys gfxinfo com.tencent.mm framestats` 看到 Choreographer 的 doFrame 被推迟，StrictMode `detectDiskWrites().detectDiskReads()` 在微信主线程报 SharedPreferences `.commit()` 与 `ContentResolver.insert/query`。
 - **根因**：`startFallbackPoller()` 在 `onPackageLoaded` 无条件 `main.postDelayed(poll, 1200L)` 起一个主线程 700ms 自续轮询，唯一闸门 `if (!mainProcess)` 不读 `featureEnabled()`；每轮 6 个 `check*`/`retry*` + `checkSelfTest()` 两次 `SystemProperties` 反射，`cfgPrefs()` 3s TTL 一到就 `getRemotePreferences` 跨进程重附着。有待补发队列时还叠 `UiSender.hasInput()` 全树递归与 `RecordExporter` 分片 `insert()` 同步 `.commit()` 写盘。`hookImageSent` 的 `isImage` 每条消息 `getDeclaredMethods()` 全扫；`AlbumMemoryToggle` 的 `OnGlobalLayoutListener` 只 add 不 remove，每次全局布局拼 kids 字符串并 `Log.i`；`Reflect.findMethod/findField` 每次沿继承链全扫。这些都不是图片解码，解码在宿主侧，插件只是把主线程时间片吃掉了。
 - **怎么避**：轮询主体放 `HandlerThread`，必须读 View 的 `flushFallback()` 用 `main.post` 回主线程并用 `AtomicBoolean flushPending` CAS + `CountDownLatch.await(1500ms)` 有界合并；`pushRecords` 统一 hop 到 worker 并保留 `synchronized doPushRecords`；`SystemProperties.get` / 消息 `getType` / `Reflect.findMethod/findField` 按 Class 缓存 Method（查无也记哨兵）；本地台账 `.commit()` 改 `.apply()`，跨进程 Provider 末片拼 JSON 的 `.commit()` 不能换（Binder 同步语义）；相册注入只挂一个常驻 `OnGlobalLayoutListener`，默认零字符串分配、零反射、零 Log.i，保证勾「原图」后底栏变宽仍能重算 dx。别拿「功能开关关了就不会卡」当判据 —— 轮询不读开关；验收用 `adb shell dumpsys gfxinfo com.tencent.mm framestats` 与 `StrictMode.setThreadPolicy(new ThreadPolicy.Builder().detectDiskWrites().detectDiskReads().penaltyLog().build())`。
+
+## 30. 用户填一条通配规则，微信就卡住不动
+
+- **现象**：开启文字过滤、规则里填了带多个 `*` 的写法（`*a*a*a*a*b` 这种，或从别处粘来的长词），发图时微信界面卡死数秒到数十秒；`logcat` 里没有任何异常，最后进程被系统 ANR 掉。换成别的文本又不复现。
+- **根因**：`TextFilter` 早期把通配编译成正则（`*` → `.*`、`?` → `.`）再 `String.matches()`。`matches()` 要求整串命中，正则引擎在最坏情况下按指数级回溯 —— 规则是用户手填的、长度没有上限，一个病态模式就能吃掉微信主线程的时间片。这类开销只对特定文本触发，所以「平常都好好的」。
+- **怎么避**：通配不许交给正则。现在 `Rule` 直接持有 glob 串，`globMatches` 用双指针 + 回溯点（`star` / `mark`）线性推进，最坏 O(长度 × 星号数)；大小写折叠在 `find()` 里对每段文本只做一次 `toLowerCase(Locale.ROOT)` 后复用（`folded` / `foldedDone` 两个数组）。回归钉在 `TextFilterTest.wildcardKeepsHandOnPathologicalPattern`：`"*a"×12 + "*b"` 对 60 个 `a` 必须不命中且耗时 < 2s。凡「把用户输入变成可执行模式」的地方都按这条办（正则 / 通配 / SQL 前缀都算），并在单测里给一个病态输入，别只测正常形状。
+
+## 31. 钩子先标记后挂载，一次失败就永久不再尝试
+
+- **现象**：微信升级或热重启后，相册底栏的「原图」开关再也不出现、发图也不再补文件名；重启模块、重新勾作用域都没用，只有重装模块或重启手机偶尔恢复。`logcat` 里只有一个早年的 `hooked ...` 记录，之后没有任何失败日志。
+- **根因**：挂载点用 `hooked` 集合去重，但 `markHooked(...)` 写在 `hook()` 之前（`hookAlbumToggle` 里甚至在 `findClass` 之前）。类找不到、方法签名变了、反射抛异常时标记已经落下，之后每次进 `installAll` 都被「已挂载」挡住 —— 一次瞬时失败变成整个过程生命周期的永久失效。另外 `on5.f#a` 只按名字 + 参数类型定位、不校验返回类型，而拦截成功路径 `return null`：某版本若不是 `void`，宿主拆箱就是 NPE 崩微信。
+- **怎么避**：① 标记只在 `hook()` 成功返回之后落，键要够细（类名 + 参数个数 + 成员名，不能只用参数个数或只用类名），并在标记成功后打一行 `hooked ...`；② 带返回值的挂载点先校验 `m.getReturnType() != void.class`，不匹配就跳过并打日志，别硬拦；③ 拦截回调体一律包 `try/catch(Throwable)` —— `PROTECTIVE` 模式下宿主吞掉异常、我们这边又没有日志，出事就完全查不到线索。
+
+## 32. 发文字的兜底队列会「串批」，还会吞掉下一批
+
+- **现象**：连发两批图，第二批的 `+N` 文字排进了第一批的记录组；或者更糟 —— 上一批收工时把还在排队的那批文字一起清了，用户一直没等到文件名，`logcat` 里也没有 drop 记录。
+- **根因**：兜底队列只有一组全局状态 `pendingDrafts` / `pendingIndex` / `pendingAt`，三个来源（`armFromParams`、`armDeferred`、接管批末）各自整表替换：队列已经补发到第 i 格时被换成新批，`pendingIndex` 仍是 i，新批的第 0..i-1 格就被当成旧批的发过而跳过；接管批末又无条件 `pendingDrafts = null`，把接管期间 `armDeferred` 排进来的**下一批**一并清掉。
+- **怎么避**：① 消费前先校验手里的引用还是当前表（`if (pendingDrafts != drafts) return;`），每一处清零都写成「身份相同才清」；② 新批到来时**追加到队尾**（`merged = queued + drafts`）而不是替换，且不要重置 `pendingIndex`；③ 批末只清自己那份 —— 本批的文字在 `startReplay` 开头就 `preDrafts = pendingDrafts; pendingDrafts = null` 取走了，收尾时再清一次只会误伤别人。
+
+## 33. 记录页换成 LazyColumn 后一进页面就崩
+
+- **现象**：发送记录页改 `LazyColumn` 之后，只要台账里有旧版本迁移过来的条目，进页面直接抛 `IllegalArgumentException: Key "e:0" was already used`，整页白屏。
+- **根因**：`items(list, key = { it.key })` 要求 key **全局唯一**，而迁移条目由 `FriendBridgeProvider` 的聚合表兜底造出来时 `seq` 恒为 `0`（`Event(0L, …)`）。原来用 `key(ev.seq)` 组合函数包一层，撞 key 只是复用度差；换成 Lazy 的 item key，撞了就是硬错误。
+- **怎么避**：item key 不要拿单个可能重复的字段，用「作用域键 + 组内下标 + 原字段」（`"e:" + g.key + ":" + i + ":" + ev.seq`）。改 Lazy 化之前先确认候选 key 在**最坏数据**下唯一（迁移 / 导入 / 手工改过的台账都要算），并把这条写进该行数据类的 KDoc。
