@@ -558,4 +558,28 @@
 
 **收尾**：全仓 `*.dshclaim` 孤儿占位按 JSON tag 核归属后清零（本会话 + 三路已结束分片），`claim_status`「当前没有登记的会话」；`.work/` 报告 / diff / 日志 / bak / APK 全部保留，`.gitignore:38` 覆盖不入库；真机帧耗时 `[待补: 真机帧耗时实测]`。
 
+## 2026-11-14 · 发版 1.0.0：版本号进位 + Release 发布（主标题带版本定位）
+
+> **一句话**：把上一轮「发送链路重构 + 桥协议收口」收成 1.0.0 发出去，版本号 / CHANGELOG / Release 正文 / 标题口径四处对齐。
+
+**需求（用户）**：「wxpiclabe 发release 版本号变更1.0.0 主标题提一下这次更新为功能重构升级（重构了没我不知道，我只知道有些功能升级了，实事求是就好）然后给我个release包」——标题要一句版本定位，内容不许吹。
+
+**版本口径**：`versionCode 13` / `versionName "1.0.0"` / tag `13-1.0.0` / Release 标题 `v1.0.0 · 功能重构升级` / 资产 `WxPicLabel_13-1.0.0.apk` / CHANGELOG 段 `## [1.0.0] - 2026-11-14`。
+
+- 标题带一句定位与 `docs/VERSIONING.md` §1.1 旧口径（「只写 `v{versionName}`，不加任何描述」）冲突；用户当轮指令优先，同轮把 §1.1 改成「允许一句版本定位、仍禁止功能清单」，避免文档与现实打架。
+
+**改动（3 个文件 + Release 正文）**
+- `app/build.gradle.kts:27-28`：`versionCode 12 → 13`、`versionName "0.8.2" → "1.0.0"`
+- `CHANGELOG.md:5`：新增 `## [1.0.0] - 2026-11-14` 段头，本轮 11 条改动（热路径台账、接管批次 CAS、拦截线程、丢文件名、钩子健壮性、兜底队列串批、通配规则、桥协议 + `/status`、记录页 LazyColumn、帧路径分配、日志导出并发）原样归入，一条没改
+- `docs/VERSIONING.md:21-28`：Release 标题口径订正（表格行 + 两段说明）
+- `.work/release-body-1.0.0.md`：Release 正文按三段固定结构（加粗一句话 / Issues 入口 / `## 本版内容` 四分区：发送·稳定性 / 桥协议·诊断 / 界面 / 文档）
+
+**验收（实测）**
+- `build.cmd release` → `BUILD SUCCESSFUL in 59s`、`48 actionable tasks: 19 executed, 29 up-to-date`、`BUILD_EXIT=0`（日志 `.work/release-1.0.0-build.log`）
+- APK `1,485,004 B`，`aapt2 dump badging` 回读 `versionCode='13' versionName='1.0.0'`（体积比 0.8.2 的 1,435,544 B 大 49,460 B，本轮新增 `BridgeProtocol` 与 `/status` 探针）
+- `python tools/check-docs.py` → exit 0「扫描 20 篇文档, 索引完整, 无断链, 无孤儿」；`python tools/check-secrets.py` → exit 0「扫描 130 个文件, 命中 0 处」；`git diff --check` → exit 0
+- `:app:testReleaseUnitTest` → `BUILD SUCCESSFUL in 48s`、`TEST_EXIT=0`，48 项全过（BridgeProtocolTest 3 / ConfigKeysTest 6 / RenameRulesTest 14 / RepeatWindowTest 11 / TextFilterTest 14，failures=0 errors=0）
+- **同一份源码两次构建体积完全相同（1,485,004 B）但 sha256 不同**：`build.cmd` 先跑 `:app:assembleRelease` 再跑传入的任务，跑单测那一轮把 APK 重打了一遍，`BuildConfig.BUILD_TIME`（配置期算的 `yyyy-MM-dd HH:mm`，字符串等长）变了 → 字节变。以**最后一次**构建产物为准，见 `docs/PITFALLS.md` §22/§26
+- 最终 sha256 `40556708392E79D9F5954F9DB1E1D38D53E8FFDB6E2907806044589CDCA0FBAF`（构建 job `completed` 且 `LastWriteTime` 稳定后才算），`dist/WxPicLabel_13-1.0.0.apk` 副本同值
+
 [[TASK_ALL_DONE]]

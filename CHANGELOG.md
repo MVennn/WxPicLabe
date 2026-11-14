@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-14
+
 - 优化 发图热路径不再整份拷贝计数台账（2026-11-14）：`RepeatCounter` 每张图要走 4 次 `SharedPreferences.getAll()`（`rawOf` 每次把 300+ 条台账与 600 条事件全拷成新 map 再取一个键，连发 50 张约 7MB 临时对象），`trimEventsIfNeeded` 还会把 ≤600 条事件无条件解析成 `Event`。现在 `strOf` / `longOf` / `boolOf` 直连 `getString` / `getLong` / `getBoolean`（类型写错仍回落原实现，防御不变），裁剪改成进程内已校准计数短路、每 16 次计数才真扫一遍；`__seq` 改为清空记录时保留不重置，供序号不复用与 `applyEdits` 判重依赖
 - 优化 接管批次改「每批一份入口上下文 + CAS 独占位」：原来入口 `Method` / `this` / 参数存在三个 `volatile` 字段里，跨批共享，第二张图并发拦进来会把上一批的入口覆盖掉（重放的是别人的图）。现在每批建 `ReplayCtx` 挂 `ThreadLocal`，并用 `AtomicBoolean` 抢独占位；抢不到不是丢文字，而是转兜底队列排队补发
 - 优化 拦截线程不再等跨进程 binder 读配置：`cfgPrefs()` 的 3s TTL 到期改为把重附着 hop 到 `wxpiclabel-poller` 线程、本次调用继续用旧快照（拿不到就沿用上一次，仍 fail-closed）；`scopeAllowed` 每张图只取一次 prefs 快照，作用域名单按「附着时间戳 + key」缓存，不再每次 `getStringSet` 新拷一份；`labelOf(String)` 去掉 `new File(path).getName()`，`resolveContentUri` 加 `LruCache(64)`
