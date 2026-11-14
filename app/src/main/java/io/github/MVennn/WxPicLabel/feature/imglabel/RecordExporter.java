@@ -35,7 +35,9 @@ public final class RecordExporter {
      */
     private static final int CHUNK_CHARS = 3000;
 
-    private static final String URI_RECORDS = "content://io.github.MVennn.WxPicLabel.bridge/records";
+    private static final String URI_RECORDS =
+            "content://" + io.github.MVennn.WxPicLabel.core.BridgeProtocol.AUTHORITY
+                    + "/" + io.github.MVennn.WxPicLabel.core.BridgeProtocol.PATH_RECORDS;
 
     private RecordExporter() {
     }
@@ -72,7 +74,13 @@ public final class RecordExporter {
                 v.put("chunk", doc.substring(from, to));
                 v.put("index", i);
                 v.put("total", total);
-                ctx.getContentResolver().insert(uri, v);
+                // provider 拒收（进程被冻住 / 规模闸门 / 白名单不符）时返回 null：
+                // 这时必须整批放弃，否则最后一片到达时会把「缺片」的文档当成完整快照落盘，
+                // 记录页显示的就是一段残缺 JSON。返回 false 让模块侧的退避重试接手。
+                if (ctx.getContentResolver().insert(uri, v) == null) {
+                    log.log("records: chunk " + i + "/" + total + " rejected, abort push");
+                    return false;
+                }
                 from = to;
             }
             int rowCount = rows == null ? 0 : rows.size();
@@ -95,9 +103,19 @@ public final class RecordExporter {
     private static String buildDoc(List<RepeatCounter.Row> rows,
                                    List<RepeatCounter.Event> events,
                                    String edited) {
-        StringBuilder sb = new StringBuilder(1024);
+        // 一次拼完整份文档（可能 40KB）：按行数与事件数预估容量，省掉十几次扩容拷贝。
+        // 估小了只是退化成原来那种边拼边长，估大了也就多占一块临时数组。
+        int cap = 256;
+        if (rows != null) {
+            cap += rows.size() * 64;
+        }
+        if (events != null) {
+            cap += events.size() * 96;
+        }
+        StringBuilder sb = new StringBuilder(Math.max(1024, cap));
         sb.append("{\"at\":").append(System.currentTimeMillis())
-                .append(",\"v\":2")
+                .append(",\"v\":")
+                .append(io.github.MVennn.WxPicLabel.core.BridgeProtocol.SCHEMA)
                 .append(",\"edited\":\"").append(FriendExporter.jsonEscape(edited == null ? "" : edited))
                 .append("\",\"records\":[");
         if (rows != null) {

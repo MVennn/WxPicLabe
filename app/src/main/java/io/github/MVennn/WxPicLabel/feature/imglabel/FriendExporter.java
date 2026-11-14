@@ -6,6 +6,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.github.MVennn.WxPicLabel.core.BridgeProtocol;
 import io.github.MVennn.WxPicLabel.util.Reflect;
 
 /**
@@ -203,17 +204,19 @@ public final class FriendExporter {
      * 每批 [CHUNK_SIZE] 条一条 insert，避开 Binder ~1MB 的事务上限；
      * Provider 侧收到最后一片时按序拼成完整 JSON 全量落盘。
      */
-    public static void push(android.content.Context ctx, List<Entry> list, Logger log) {
+    public static boolean push(android.content.Context ctx, List<Entry> list, Logger log) {
         if (ctx == null || list == null || list.isEmpty()) {
-            return;
+            // 空名单不是失败：本来就没有可回传的，重试也不会变
+            return true;
         }
         try {
             int total = (list.size() + CHUNK_SIZE - 1) / CHUNK_SIZE;
             android.net.Uri uri = android.net.Uri.parse(
-                    "content://io.github.MVennn.WxPicLabel.bridge/friends");
+                    "content://" + BridgeProtocol.AUTHORITY + "/" + BridgeProtocol.PATH_FRIENDS);
             for (int i = 0; i < total; i++) {
-                StringBuilder sb = new StringBuilder();
                 int end = Math.min(list.size(), (i + 1) * CHUNK_SIZE);
+                // 每条大约 96 个字符（id/name 两个字符串 + 固定字段），预估一次省掉多轮扩容
+                StringBuilder sb = new StringBuilder(Math.max(256, (end - i * CHUNK_SIZE) * 96));
                 for (int k = i * CHUNK_SIZE; k < end; k++) {
                     Entry e = list.get(k);
                     sb.append('{')
@@ -226,11 +229,20 @@ public final class FriendExporter {
                 v.put("chunk", sb.toString());
                 v.put("index", i);
                 v.put("total", total);
-                ctx.getContentResolver().insert(uri, v);
+                // Provider 拒收（进程冻住 / 规模闸门 / 白名单不符）返回 null：缺片还继续发，
+                // 末片会把不完整的名单当成全量快照落盘（名单被截断、会话白名单跟着错）。
+                if (ctx.getContentResolver().insert(uri, v) == null) {
+                    log.log("friends: chunk " + i + "/" + total + " rejected, abort push");
+                    return false;
+                }
             }
             log.log("friends: pushed " + list.size() + " in " + total + " chunk(s)");
+            return true;
         } catch (Throwable t) {
+            // 返回值让调用方决定要不要退避重试：Provider 被系统冻住时这里会抛，
+            // 一次失败就再也不推的话，记录页/会话白名单会一直是旧名单
             log.log("friends: push failed: " + t);
+            return false;
         }
     }
 

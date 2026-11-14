@@ -8,6 +8,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Binder
 import android.os.Process
+import io.github.MVennn.WxPicLabel.core.BridgeProtocol
 import io.github.MVennn.WxPicLabel.core.ConfigKeys
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,10 +44,13 @@ import org.json.JSONObject
 class FriendBridgeProvider : ContentProvider() {
 
     companion object {
-        const val AUTHORITY = "io.github.MVennn.WxPicLabel.bridge"
-        const val PATH_FRIENDS = "friends"
+        const val AUTHORITY = BridgeProtocol.AUTHORITY
+        const val PATH_FRIENDS = BridgeProtocol.PATH_FRIENDS
         /** 发送记录（同名图片计数表）回传通道。 */
-        const val PATH_RECORDS = "records"
+        const val PATH_RECORDS = BridgeProtocol.PATH_RECORDS
+        /** 只读探针（见 [BridgeProtocol.PATH_STATUS]）。 */
+        const val PATH_STATUS = BridgeProtocol.PATH_STATUS
+        const val SCHEMA = BridgeProtocol.SCHEMA
         const val COL_CHUNK = "chunk"
         const val COL_INDEX = "index"
         const val COL_TOTAL = "total"
@@ -54,8 +58,30 @@ class FriendBridgeProvider : ContentProvider() {
         const val COL_FETCHED_AT = "fetched_at"
         const val COL_COUNT = "count"
 
+        // /status 的列名。**只增不改**：老调用方查 friends 路径拿的还是上面三列，
+        // 新调用方查 status 路径看到 schema 列才算「对端有探针能力」。
+        const val COL_SCHEMA = "schema"
+        const val COL_MODULE = "module"
+        const val COL_AT = "at"
+        const val COL_FEATURES = "features"
+        const val COL_LAST_RECORDS_AT = "last_records_at"
+        const val COL_LAST_FRIENDS_AT = "last_friends_at"
+        const val COL_RECORDS_CHARS = "records_chars"
+        const val COL_FRIENDS_COUNT = "friends_count"
+
         /** 每批条数上限：Binder 事务 ~1MB，留足余量。 */
         const val CHUNK_SIZE = 200
+
+        /**
+         * 一次回传允许的最大分片数 / 单片字符数。
+         *
+         * 白名单里的调用方（本应用 / root / shell / 微信）本意都是「一批选图或一次好友同步」，
+         * 但协议里 total 是调用方说了算：不设上限时一句
+         * `content insert --bind total:i:100000000` 就能让末片的拼装循环把模块 App 进程撑爆。
+         * 512 片（按 200 条一片算已是十万级名单）远超真实用量，撞到上限就整批拒收。
+         */
+        private const val MAX_CHUNKS = 512
+        private const val MAX_CHUNK_CHARS = 512 * 1024
 
         private const val PREFS = "wxpiclabel_friends"
         private const val KEY_JSON = "friends_json"
@@ -104,6 +130,10 @@ class FriendBridgeProvider : ContentProvider() {
         if (total <= 0 || index < 0 || index >= total) {
             return null
         }
+        // 规模闸门放在落盘之前：拒收就是一行 null，不留下半份分片
+        if (total > MAX_CHUNKS || chunk.length > MAX_CHUNK_CHARS) {
+            return null
+        }
         val store = store()
         synchronized(store) {
             // 每个分片按 index 落位；最后一片到达时按序拼接成完整 JSON 全量覆盖
@@ -116,15 +146,21 @@ class FriendBridgeProvider : ContentProvider() {
                 val now = System.currentTimeMillis()
                 // friends 由这里套外壳；records 的片段本身就是完整文档，原样拼接
                 val json = if (isFriends) {
-                    "{\"fetchedAt\":$now,\"friends\":[$sb]}"
+                    // 信封带上 schema：读侧（FriendStore）忽略未知键，但排障与以后的新调用方
+                    // 能一眼看出这份快照是哪一版写出来的
+                    "{\"v\":$SCHEMA,\"fetchedAt\":$now,\"friends\":[$sb]}"
                 } else {
                     sb.toString()
                 }
                 val e = store.edit()
                     .putString(targetKey, json)
                     .putLong(stampKey, now)
-                for (i in 0 until total) {
-                    e.remove(pendingPrefix + i)
+                // 按前缀清全部分片，不是只清 0..total-1：上一批如果更长（比如 6 片），
+                // 这一批只有 3 片时 3..5 号分片会永远留在盘上，下次拼装照样把它们带上。
+                for (key in store.all.keys) {
+                    if (key.startsWith(pendingPrefix)) {
+                        e.remove(key)
+                    }
                 }
                 e.commit()
             }
@@ -140,6 +176,9 @@ class FriendBridgeProvider : ContentProvider() {
         sortOrder: String?,
     ): Cursor {
         ensureAllowed()
+        if (uri.lastPathSegment == PATH_STATUS) {
+            return statusCursor()
+        }
         val book = FriendStore.read(context!!)
         val json = if (book.entries.isEmpty()) "" else {
             val arr = JSONArray()
@@ -150,6 +189,60 @@ class FriendBridgeProvider : ContentProvider() {
         }
         return MatrixCursor(arrayOf(COL_JSON, COL_FETCHED_AT, COL_COUNT)).apply {
             addRow(arrayOf<Any>(json, book.fetchedAt, book.entries.size))
+        }
+    }
+
+    /**
+     * 只读探针：一次查询回答「对端是哪一版、支持到什么程度、上次回传是什么时候」。
+     *
+     * 全部取自本机已有的落盘状态（prefs 里的快照 + 配置开关），不触发任何抓取，
+     * 所以在微信没跑、模块没挂上时也能查 —— 这正是它作为排障入口的价值。
+     */
+    private fun statusCursor(): Cursor {
+        val sp = store()
+        val recordsJson = sp.getString(KEY_RECORDS_JSON, "") ?: ""
+        val friendsJson = sp.getString(KEY_JSON, "") ?: ""
+        val moduleVersion = try {
+            context!!.packageManager.getPackageInfo(context!!.packageName, 0).versionName ?: ""
+        } catch (t: Throwable) {
+            ""
+        }
+        val features = JSONObject()
+            .put(ConfigKeys.ENABLED,
+                ModulePreferences.getBoolean(ConfigKeys.ENABLED, ConfigKeys.DEFAULT_ENABLED))
+            .put(ConfigKeys.IMG_LABEL,
+                ModulePreferences.getBoolean(ConfigKeys.IMG_LABEL, ConfigKeys.DEFAULT_IMG_LABEL))
+            .toString()
+        return MatrixCursor(
+            arrayOf(
+                COL_SCHEMA, COL_MODULE, COL_AT, COL_FEATURES,
+                COL_LAST_RECORDS_AT, COL_LAST_FRIENDS_AT, COL_RECORDS_CHARS, COL_FRIENDS_COUNT,
+            ),
+        ).apply {
+            addRow(
+                arrayOf<Any>(
+                    SCHEMA,
+                    moduleVersion,
+                    System.currentTimeMillis(),
+                    features,
+                    sp.getLong(KEY_RECORDS_AT, 0L),
+                    sp.getLong(KEY_FETCHED_AT, 0L),
+                    recordsJson.length,
+                    friendCount(friendsJson),
+                ),
+            )
+        }
+    }
+
+    /** 好友条数：从快照里数数组长度，不重新解析成 [FriendStore.Entry]。 */
+    private fun friendCount(json: String): Int {
+        if (json.isEmpty()) {
+            return 0
+        }
+        return try {
+            JSONObject(json).optJSONArray("friends")?.length() ?: 0
+        } catch (t: Throwable) {
+            0
         }
     }
 
@@ -263,8 +356,15 @@ object RecordStore {
         val rawEvents: Int = 0,
         /** 顶层键名；解析不出来时写日志（界面上早已没有诊断行，见 docs/IMAGE-RECORD.md）。 */
         val topKeys: String = "",
-        /** 读到它的路径：strict / lenient / salvage / empty。 */
+        /** 读到它的路径：strict / lenient / salvage / empty / unsupported。 */
         val path: String = "strict",
+        /**
+         * 文档里声明的载荷版本（顶层 `"v"`，缺省 1 = 老版本没有版本号）。
+         *
+         * 大于 [BridgeProtocol.SCHEMA] 说明写这份文档的模块比本 App 还新：
+         * 结构可能有新字段，解析走 lenient，[path] 标 `unsupported`。
+         */
+        val schema: Int = 1,
     ) {
         val isEmpty: Boolean get() = events.isEmpty() && rows.isEmpty()
     }
@@ -287,8 +387,10 @@ object RecordStore {
         var rows: List<Row> = emptyList()
         var events: List<Event> = emptyList()
         var path = "strict"
+        var declaredSchema = 1
         try {
             val root = JSONObject(json)
+            declaredSchema = root.optInt("v", 1)
             topKeys = keysOf(root)
             edited = root.optString("edited", "")
             val rowsArr = arrayOf(root, "records", "rows")
@@ -317,6 +419,10 @@ object RecordStore {
                 path = "empty"
             }
         }
+        // 对端比我们新：能解析多少算多少，但必须让调用方看见「这是新版本写的文档」
+        if (declaredSchema > BridgeProtocol.SCHEMA) {
+            path = "unsupported"
+        }
         val hasEv = events.isNotEmpty()
         val parsedAny = rows.isNotEmpty() || events.isNotEmpty()
         return Book(
@@ -331,6 +437,7 @@ object RecordStore {
             rawEvents = rawEvents,
             topKeys = topKeys,
             path = path,
+            schema = declaredSchema,
         )
     }
 

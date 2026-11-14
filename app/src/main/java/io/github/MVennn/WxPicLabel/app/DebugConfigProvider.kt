@@ -39,6 +39,12 @@ class DebugConfigProvider : ContentProvider() {
         const val COL_IMG_LABEL = "img_label"
         const val COL_IMG_LABEL_REPEAT = "img_label_repeat_count"
         const val COL_IMG_LABEL_RESET = "img_label_repeat_reset"
+
+        // 只读诊断列：会话白名单与记录编辑令牌以前只能靠 raw 那一列自己肉眼切分，
+        // 脚本对不上「哪个会话为什么没生效」时就只能猜。只出现在 query 里，update 不认。
+        const val COL_IMG_LABEL_SCOPE_ONLY = "img_label_scope_only"
+        const val COL_IMG_LABEL_SCOPE_IDS = "img_label_scope_ids"
+        const val COL_IMG_LABEL_RECORD_EDITS = "img_label_record_edits"
     }
 
     override fun onCreate(): Boolean {
@@ -84,6 +90,7 @@ class DebugConfigProvider : ContentProvider() {
         val columns = arrayOf(
             COL_ENABLED, COL_LOG_LEVEL, COL_BACKEND, COL_RAW,
             COL_IMG_LABEL, COL_IMG_LABEL_REPEAT, COL_IMG_LABEL_RESET,
+            COL_IMG_LABEL_SCOPE_ONLY, COL_IMG_LABEL_SCOPE_IDS, COL_IMG_LABEL_RECORD_EDITS,
         )
         val values = arrayOf<Any>(
             if (ModulePreferences.getBoolean(ConfigKeys.ENABLED, ConfigKeys.DEFAULT_ENABLED)) 1 else 0,
@@ -93,6 +100,9 @@ class DebugConfigProvider : ContentProvider() {
             if (ModulePreferences.getBoolean(ConfigKeys.IMG_LABEL, ConfigKeys.DEFAULT_IMG_LABEL)) 1 else 0,
             if (ModulePreferences.getBoolean(ConfigKeys.IMG_LABEL_REPEAT_COUNT, ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_COUNT)) 1 else 0,
             ModulePreferences.getString(ConfigKeys.IMG_LABEL_REPEAT_RESET, ConfigKeys.DEFAULT_IMG_LABEL_REPEAT_RESET),
+            if (ModulePreferences.getBoolean(ConfigKeys.IMG_LABEL_SCOPE_ONLY_SELECTED, ConfigKeys.DEFAULT_IMG_LABEL_SCOPE_ONLY_SELECTED)) 1 else 0,
+            ModulePreferences.getStringSet(ConfigKeys.IMG_LABEL_SCOPE_IDS, emptySet()).joinToString(","),
+            ModulePreferences.getStringSet(ConfigKeys.IMG_LABEL_RECORD_EDITS, ConfigKeys.DEFAULT_IMG_LABEL_RECORD_EDITS).joinToString(","),
         )
         if (columns.size != values.size) {
             throw IllegalStateException(

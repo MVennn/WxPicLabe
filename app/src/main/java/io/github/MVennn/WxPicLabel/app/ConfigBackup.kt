@@ -23,6 +23,15 @@ object ConfigBackup {
     /** 备份格式版本；字段不兼容时递增，导入侧按此做兼容 */
     const val FORMAT_VERSION = 1
 
+    /**
+     * 导入时接受的文本上限（字符）。
+     *
+     * 文件由用户在系统文件选择器里挑，选错成一个大 JSON 时 [JSONObject] 会把整份文本
+     * 解析成对象树 —— 几百 MB 就足以把模块 App 直接 OOM 掉。本模块的备份就是一份配置，
+     * 256 KB 已经是二十倍余量。
+     */
+    private const val MAX_IMPORT_CHARS = 256 * 1024
+
     /** 导出当前配置为 JSON 文本 */
     fun exportJson(): String {
         val root = JSONObject()
@@ -55,6 +64,9 @@ object ConfigBackup {
      * @return 成功时返回实际写入的键数量；失败返回 [Result.failure]（附可读原因）
      */
     fun importJson(text: String): Result<Int> = runCatching {
+        require(text.length <= MAX_IMPORT_CHARS) {
+            "备份文件过大（上限 " + MAX_IMPORT_CHARS + " 字符），这不像是本模块的配置备份"
+        }
         val root = JSONObject(text)
 
         val format = root.optString("format")

@@ -73,6 +73,9 @@ object LogExporter {
             appendLine("WxPicLabel 日志导出")
             appendLine("生成时间：${stamp()}")
             appendLine("模块版本：${BuildConfig.VERSION_NAME}（versionCode ${BuildConfig.VERSION_CODE}）")
+            // 桥协议版本进文件头：日志里出现「回传字段看不懂 / 记录页空着」时，
+            // 第一件事就是比对两边的 schema，而不是去猜哪一边是旧包。
+            appendLine("桥协议：schema ${BridgeProtocol.SCHEMA}")
             appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE}（SDK ${Build.VERSION.SDK_INT}）/ ${Build.SUPPORTED_ABIS.firstOrNull().orEmpty()}")
             appendLine("日志等级：$levelLabel")
             appendLine()
@@ -171,10 +174,14 @@ object LogExporter {
             val process = ProcessBuilder("su", "-c", command)
                 .redirectErrorStream(true)
                 .start()
+            // out 同时被读线程写、被调用线程读：join 超时后读线程仍可能 append，
+            // StringBuilder 不是线程安全的，必须两边都拿同一把锁，否则 toString 会读到半截字符。
             val out = StringBuilder()
             val reader = Thread {
                 runCatching {
-                    process.inputStream.bufferedReader().useLines { seq -> seq.forEach { out.appendLine(it) } }
+                    process.inputStream.bufferedReader().useLines { seq ->
+                        seq.forEach { line -> synchronized(out) { out.appendLine(line) } }
+                    }
                 }
             }
             reader.isDaemon = true
@@ -188,10 +195,11 @@ object LogExporter {
                     runCatching { process.destroyForcibly() }
                 }
                 reader.join(1000)
-                return ShellResult(-1, out.toString(), timedOut = true)
+                // join 超时也不代表读线程停了：锁内取快照，拿到的至少是完整行。
+                return ShellResult(-1, synchronized(out) { out.toString() }, timedOut = true)
             }
             reader.join(1000)
-            ShellResult(process.exitValue(), out.toString(), timedOut = false)
+            ShellResult(process.exitValue(), synchronized(out) { out.toString() }, timedOut = false)
         } catch (t: Throwable) {
             // 设备上没有 su / 被安全策略拒绝
             GLog.w("执行 su 失败：${t.javaClass.simpleName}", t)
