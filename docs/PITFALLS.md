@@ -192,3 +192,15 @@
 - **现象**：发送记录页改 `LazyColumn` 之后，只要台账里有旧版本迁移过来的条目，进页面直接抛 `IllegalArgumentException: Key "e:0" was already used`，整页白屏。
 - **根因**：`items(list, key = { it.key })` 要求 key **全局唯一**，而迁移条目由 `FriendBridgeProvider` 的聚合表兜底造出来时 `seq` 恒为 `0`（`Event(0L, …)`）。原来用 `key(ev.seq)` 组合函数包一层，撞 key 只是复用度差；换成 Lazy 的 item key，撞了就是硬错误。
 - **怎么避**：item key 不要拿单个可能重复的字段，用「作用域键 + 组内下标 + 原字段」（`"e:" + g.key + ":" + i + ":" + ev.seq`）。改 Lazy 化之前先确认候选 key 在**最坏数据**下唯一（迁移 / 导入 / 手工改过的台账都要算），并把这条写进该行数据类的 KDoc。
+
+## 34. 一次选 90 张以上，后面的文字成段粘连、同一名字发两遍
+
+- **现象**：一次选一百来张图发出去，前几十张还是「图 → 文件名」交替，后面开始出现「几条文字连在一起、对应的图后到或者干脆没跟上」，同一个文件名（不带 +N）出现两次，偶尔还有 +2 的虚增。
+- **根因**：接管批闸 `takeoverUntil` 是「批开始 + 180 s」的固定时间窗。单张图要等「发送成功」事件，实测 2 s 上下，90 张左右正好把窗口耗尽。窗口一过：① `armFromParams`（`db0.u#Vj` 钩子）不再被挡，把正在重放的那张图重新算一遍文字（新表 → 计数再 bump 一次）排进兜底队列；② `flushFallback` 也不再让路，于是同一条文字被接管线程和兜底队列各发一遍；③ 等不到确认而进入的退化分支只补 800 ms 固定间隔，文字抢在还在上传的图片前面落进聊天页。
+- **怎么避**：批闸看**状态**不看时钟 —— `replayActive` 为真就一直算「接管进行中」，`armFromParams` / `flushFallback` / `on5.f#a` 三处都按它让路，`takeoverUntil` 只留作进程异常时的僵尸兜底。退化分支发文字前先 `drainInFlight` 等上传排空，排空期间看到新事件就复位 `sentMisses` 回到确认模式；长批次每 10 张（`BATCH_DRAIN_EVERY`）主动排空一次。判据：`logcat` 里 `takeover: image#N/M` 与 `text#N/M` 的序号要成对递增，`repeat: label=… count=` 同一名字只应出现一次。
+
+## 35. 接管期间又发一批，满屏图挤在文字前面
+
+- **现象**：上一批还没发完又选一批图发出去，第二批的图瞬间整版涌进聊天，文件名全落在图后面 —— 又是「一大段图 + 一堆字」。
+- **根因**：发送入口拦截里，接管期间的后续批走的是 `armDeferred(params)` + `chain.proceed()`：文字排进兜底队列，图交回微信原样发。微信侧的批量发送本来就是「先把图全发出去」，于是这一批立刻整批发完，兜底队列随后每 700 ms 补一条文字。
+- **怎么避**：后续批不交回微信，排进 `queuedBatches`，当前批收工时由 `releaseBatchRefs` 串行接手，独位 `replayActive` 一直保持到队列清空。上限 `MAX_QUEUED_BATCHES = 24`，超了才退回原样发。判据：logcat 出现 `takeover: queued=N`，随后 `takeover: chaining queued batch`，且 `image#N/M` 的 M 按批从 1 重新数。

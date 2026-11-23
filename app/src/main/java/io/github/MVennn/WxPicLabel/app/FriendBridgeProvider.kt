@@ -669,6 +669,41 @@ object RecordEdits {
         return write(context, next)
     }
 
+    /**
+     * 批量追加动作（同 seq 覆盖），只写一次盘、只换一次令牌。
+     *
+     * 整段删除一次要提交一百多条 `d|seq`：逐条 [commit] 就是一百多次写盘 + 一百多次令牌轮换，
+     * 微信进程那边每换一次令牌就整表重算一遍，界面上看就是卡住。
+     */
+    fun commitAll(context: Context, ops: Collection<String>): Set<String> {
+        if (ops.isEmpty()) return read(context)
+        return write(context, merge(read(context), ops))
+    }
+
+    /**
+     * 把新动作并进现有动作串：按 `seq` 覆盖（同一行只留最新一条），解析不出 `seq` 的原样追加。
+     *
+     * 抽成纯函数是为了能单测：整段删除一次要并一百多条 `d|seq`，合并错了就是删错行。
+     */
+    internal fun merge(current: Collection<String>, incoming: Collection<String>): Set<String> {
+        if (incoming.isEmpty()) return current.toSet()
+        val latest = HashMap<String, String>()   // seq -> 这一批里最新的一条
+        val loose = ArrayList<String>()          // 解析不出 seq 的照原样带上
+        for (op in incoming) {
+            val seq = op.split('|').getOrNull(1)
+            if (seq == null) loose.add(op) else latest[seq] = op
+        }
+        val next = HashSet<String>()
+        for (cur in current) {
+            val seq = cur.split('|').getOrNull(1)
+            if (seq != null && latest.containsKey(seq)) continue
+            next.add(cur)
+        }
+        next.addAll(latest.values)
+        next.addAll(loose)
+        return next
+    }
+
     /** 清空全部动作（「清空发送记录」时用；台账本身另走 RESET 令牌清）。 */
     fun clear(context: Context): Set<String> {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()

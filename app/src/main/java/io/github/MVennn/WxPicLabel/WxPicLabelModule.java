@@ -104,6 +104,8 @@ public class WxPicLabelModule extends XposedModule {
 
     // ------------------------------------------------------------------ 接管状态
 
+    /** 长批次每 10 张主动排空一次微信上传队列（超过 90 张后确认事件开始积压）。 */
+    private static final int BATCH_DRAIN_EVERY = 10;
     /** 我们自己重放 on5.f#a 时的递归保护。 */
     private final ThreadLocal<Boolean> replayGuard = new ThreadLocal<>();
     /**
@@ -131,8 +133,31 @@ public class WxPicLabelModule extends XposedModule {
         }
     }
 
+    /** 接管期间被拦下的后续批次：参数与入口对象一起排队，等当前批收工后串行重放。 */
+    private static final class QueuedBatch {
+        final Object params;
+        final ReplayCtx ctx;
+
+        QueuedBatch(Object params, ReplayCtx ctx) {
+            this.params = params;
+            this.ctx = ctx;
+        }
+    }
+
     /** 接管线程自己的重放上下文；replayOne / replayOriginal 都从这里取。 */
     private final ThreadLocal<ReplayCtx> replayCtx = new ThreadLocal<>();
+
+    /**
+     * 接管期间被拦下的后续批次队列。
+     *
+     * <p>改前这些批次走 {@code armDeferred} + 交回微信原样发：一整批图在瞬间全发出去，
+     * 文件名全落在那堆图后面，用户看到的就是「一大段图集中在前、文字集中在后」。
+     * 改成排队，由同一条流水线逐张「图 → 文字」串行接着跑，形态与单批一致。
+     */
+    private final java.util.concurrent.ConcurrentLinkedQueue<QueuedBatch> queuedBatches
+            = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    /** 队列上限：连发几十批说明流水线已经卡住，超了就退回「交回微信原样发」。 */
+    private static final int MAX_QUEUED_BATCHES = 24;
 
     /**
      * 「现在有一批正在逐张重放」的独占位。
@@ -472,13 +497,33 @@ public class WxPicLabelModule extends XposedModule {
                                     log("takeover: talker=" + talker + " not in scope, let wechat send");
                                     return chain.proceed();
                                 }
-                                if (System.currentTimeMillis() < takeoverUntil) {
-                                    // 上一批还在逐张重放：这一批要是也接管，两批会抢同一个
-                                    // 「发送成功」计数和同一份列表字段，谁都对不齐。
-                                    // 交回微信原样发，文件名排进兜底队列，等上一批收工后补。
-                                    log("takeover: previous batch still running, defer text");
-                                    armDeferred(params);
-                                    return chain.proceed();
+                                if (replayActive.get() || System.currentTimeMillis() < takeoverUntil) {
+                                    // 上一批还在逐张重放：这一批不能自己开跑（两批会抢同一个
+                                    // 「发送成功」计数和同一份列表字段），也不交回微信原样发
+                                    // （那会让一整批图瞬间涌出去）。排进队列，当前批收工时串行接手。
+                                    ReplayCtx queued = new ReplayCtx(m, chain.getThisObject(),
+                                            chain.getArgs().toArray());
+                                    if (!ensureReplayReady() || queuedBatches.size() >= MAX_QUEUED_BATCHES) {
+                                        // 兜底：这一步我们仍然把图交回微信自己发，回调也归微信 post，
+                                        // 所以**不能**提前 post —— 提前了就是同一个回调跑两遍
+                                        log("takeover: queue full or replay not ready, defer text");
+                                        armDeferred(params);
+                                        return chain.proceed();
+                                    }
+                                    // 从这里起这一批由我们发：相册那边先收工，别卡「正在发送中」
+                                    if (callback instanceof Runnable) {
+                                        main.post((Runnable) callback);
+                                    }
+                                    if (replayActive.compareAndSet(false, true)) {
+                                        // 独位上没人（上一批异常退出留下的窗口）：自己接着干
+                                        log("takeover: reclaimed idle claim, start now");
+                                        startReplay(params, queued);
+                                        return null;
+                                    }
+                                    queuedBatches.offer(new QueuedBatch(params, queued));
+                                    log("takeover: queued=" + queuedBatches.size()
+                                            + " talker.c=" + talker);
+                                    return null;
                                 }
                                 ReplayCtx ctx = new ReplayCtx(m, chain.getThisObject(),
                                         chain.getArgs().toArray());
@@ -669,6 +714,11 @@ public class WxPicLabelModule extends XposedModule {
                         }
                         sleepQuietly(gap);
                         completed = k + 1;
+                        // 长批次每 10 张主动排空一次：图片全压在微信发送队列里时，
+                        // 「发送成功」事件会落后于真实上传，后面的文字就会抢跑。
+                        if (idx % BATCH_DRAIN_EVERY == 0) {
+                            drainInFlight(drainMax);
+                        }
                     } catch (Throwable t) {
                         log("takeover: image#" + idx + " failed: " + t);
                         failed.add(entry);
@@ -723,6 +773,16 @@ public class WxPicLabelModule extends XposedModule {
     private void releaseBatchRefs() {
         replayCtx.remove();
         batchTexts = null;
+        // 接管期间被拦下的下一批：串行接着跑，别让它交回微信一整批发出去。
+        // 这里**不**释放独位 —— 队列里还有人时，独位必须一直是 true，
+        // 否则新进来的批次会以为流水线空了，自己开一条并行线程。
+        QueuedBatch next = queuedBatches.poll();
+        if (next != null && replayActive.get()) {
+            takeoverUntil = 0L;
+            log("takeover: chaining queued batch, waiting=" + queuedBatches.size());
+            startReplay(next.params, next.ctx);
+            return;
+        }
         replayActive.set(false);
         // 收工就把「批还在跑」的窗口关掉。早退分支（没找到列表字段、选图为空）不经过批末
         // 那段代码，改前 takeoverUntil 会一直挂到 180s 之后：期间新发的一批全被 defer 进兜底队列，
@@ -823,8 +883,16 @@ public class WxPicLabelModule extends XposedModule {
     private void waitImageSent(int base, int idx, int total,
                                long intoGap, long confirmGap, long confirmTimeout) {
         if (sentMisses >= 2) {
-            // 退化模式：不再等事件，但也**不能零间隔** —— 零间隔会让后续每张图的上传
-            // 同时压在微信发送队列里，表现就是「图越多越慢、发完手动发文字还在转圈」
+            // 退化模式：不再死等单张事件，但发文字前必须先等上传队列排空。
+            // 只补固定间隔不够 —— 长批次（实测 >90 张）里文字会抢在图片落位前落进
+            // 聊天页，用户看到的就是「几段文字连在一起、对应的图后到或错位」。
+            // drainInFlight 看到新事件就提前返回，通常几百毫秒，不会把整批拖慢。
+            int beforeDrain = imageSent.get();
+            drainInFlight(Math.max(intoGap * 4L, 2_000L));
+            if (imageSent.get() > beforeDrain) {
+                // 排空期间还在落事件：只是确认事件偶发丢失，回到确认模式
+                sentMisses = 0;
+            }
             sleepQuietly(intoGap);
             return;
         }
@@ -1162,7 +1230,7 @@ public class WxPicLabelModule extends XposedModule {
         }
         // 接管正在跑：这一批的文字由接管逐张发，兜底队列不许插一脚。
         // 插进来还会把 batchTexts 清掉，draftFor 于是重新 bump 一次 —— 文件名会凭空 +2/+3。
-        if (System.currentTimeMillis() < takeoverUntil) {
+        if (replayActive.get() || System.currentTimeMillis() < takeoverUntil) {
             return;
         }
         // 「记忆/文件名」没勾：连文字都别算 —— RepeatCounter 在 draftFor 里会 bump 次数，
@@ -1355,7 +1423,7 @@ public class WxPicLabelModule extends XposedModule {
             }
             return;
         }
-        if (System.currentTimeMillis() < takeoverUntil) {
+        if (replayActive.get() || System.currentTimeMillis() < takeoverUntil) {
             return;   // 接管正在逐张发，别抢
         }
         if (System.currentTimeMillis() - pendingAt > 120_000L) {

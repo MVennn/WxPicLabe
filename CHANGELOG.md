@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- 修复 接管期间又发的下一批被交回微信整批发出去（2026-11-23）：后续批改为排进 `queuedBatches`，当前批收工时由 `releaseBatchRefs` 串行接手，图与文字仍逐张交替；队列上限 24 批，超限才退回「交回微信原样发」
+- 新增 发送记录页长按时间段删除整段（2026-11-23）：`ConfirmDialogSpec` 二次确认后一次提交整段 `d|seq`（`RecordEdits.commitAll`，一次写盘一次换令牌）；旧版聚合段没有逐条明细，弹说明卡
+- 修复 一次选 >90 张图后文字成段粘连、同一文件名发两遍（2026-11-23）：接管批闸 `takeoverUntil` 是「批开始 + 180 秒」固定时间窗，单张确认约 2 秒，90 张左右正好耗尽 —— 窗口一过 `db0.u#Vj` 的 `armFromParams` 把正在重放的图重新算一遍文字（新表 → 计数 +2）排进兜底队列，`flushFallback` 也不再让路，同一条文字被接管线程与兜底队列各发一遍，图还留在在途上传里。现在三处批闸改看 `replayActive` 状态（`takeoverUntil` 只留作僵尸兜底）；等不到确认的退化分支先 `drainInFlight` 等上传排空再发文字，排空期间看到新事件就复位 `sentMisses`；长批次每 10 张（`BATCH_DRAIN_EVERY`）主动排空一次，文字不再抢在图片前面落位
+
 ## [1.0.0] - 2026-11-14
 
 - 优化 发图热路径不再整份拷贝计数台账（2026-11-14）：`RepeatCounter` 每张图要走 4 次 `SharedPreferences.getAll()`（`rawOf` 每次把 300+ 条台账与 600 条事件全拷成新 map 再取一个键，连发 50 张约 7MB 临时对象），`trimEventsIfNeeded` 还会把 ≤600 条事件无条件解析成 `Event`。现在 `strOf` / `longOf` / `boolOf` 直连 `getString` / `getLong` / `getBoolean`（类型写错仍回落原实现，防御不变），裁剪改成进程内已校准计数短路、每 16 次计数才真扫一遍；`__seq` 改为清空记录时保留不重置，供序号不复用与 `applyEdits` 判重依赖

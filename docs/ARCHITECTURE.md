@@ -89,6 +89,8 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
   `__migrated` / `__reset`。两者的写入口都在 `RepeatCounter`，细节见 `docs/IMAGE-RECORD.md`。
 - 「清空发送记录」和「编辑记录」都是**单向令牌**：设置页写毫秒时间戳，微信进程轮询到变化才动手——
   清空整体重来，编辑把动作串重放一遍（幂等），改完按台账剩余最大次数反推聚合表。
+- 编辑动作串按 `seq` 幂等，**整段删除一次提交**：`RecordEdits.commitAll` 把整组 `d|seq` 合并进
+  Set 后只写一次盘、只换一次令牌 —— 逐条 `commit` 会换一百多次令牌，微信进程每次换令牌都整表重算一遍。
 - **发送记录回传**走令牌 `img_label_record_dump`：微信进程把「聚合表 + 台账 + 已应用编辑」拼成一份
   JSON 文档（顶层带 `"v"` 载荷版本与 `"at"` 生成时间），按**字符**切成 ≤3000 字的片经 `/records` 送过去
   （Provider 只按序拼接、**不加外壳**），模块 App 的 `RecordStore` 落盘、「发送记录」页展示。每批发完也会推一份。

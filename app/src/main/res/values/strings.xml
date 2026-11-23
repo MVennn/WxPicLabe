@@ -337,6 +337,11 @@
     <string name="record_event_edit_name">改文件名</string>
     <string name="record_event_edit_nth">改「第几次」</string>
     <string name="record_event_delete">删除这条</string>
+    <string name="record_group_delete_title">删除这一时间段的记录？</string>
+    <string name="record_group_delete_message">这一段 %1$d 条会一起从发送记录里消失；已经发到聊天里的图不受影响。</string>
+    <string name="record_group_delete_action">删除整段</string>
+    <string name="record_group_deleted">已删除这一段的 %1$d 条记录</string>
+    <string name="record_group_delete_none">这一段是旧版聚合记录，只有汇总表没有逐条明细，所以删不了单条。要清掉全部可以走「清空发送记录」。</string>
     <string name="record_delete_title">删除这条记录？</string>
     <string name="record_delete_message">只删这条记录，微信里已经发出去的图不受影响。</string>
     <string name="record_delete_confirm">删除</string>

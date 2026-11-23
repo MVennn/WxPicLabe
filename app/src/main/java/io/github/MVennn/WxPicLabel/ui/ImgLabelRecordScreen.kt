@@ -2,6 +2,7 @@ package io.github.MVennn.WxPicLabel.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -357,6 +358,11 @@ internal fun ImgLabelRecordScreen() {
     val cancelText = stringResource(R.string.action_cancel)
     val savedText = stringResource(R.string.record_saved)
     val deletedText = stringResource(R.string.record_deleted)
+    val groupDeleteTitle = stringResource(R.string.record_group_delete_title)
+    val groupDeleteMessage = stringResource(R.string.record_group_delete_message)
+    val groupDeleteAction = stringResource(R.string.record_group_delete_action)
+    val groupDeleted = stringResource(R.string.record_group_deleted)
+    val groupDeleteNone = stringResource(R.string.record_group_delete_none)
     val clearedText = stringResource(R.string.img_label_repeat_cleared)
     val clearTitle = stringResource(R.string.img_label_repeat_clear)
     val clearMessage = stringResource(R.string.record_clear_message)
@@ -424,6 +430,49 @@ internal fun ImgLabelRecordScreen() {
             val base = openKeys
             expanded = if (key in base) base - key else base + key
         }
+    }
+
+    /**
+     * 长按组头：把这一时间段的记录整段删掉。
+     *
+     * 一次长批次发歪就是一百多条，逐条点「删除这条」不现实。删除仍走
+     * [ConfirmDialogSpec] 二次确认，且只动「可编辑」的记录 —— 旧版聚合行没有 seq，
+     * 微信侧也没有对应的逐次台账，删不了。
+     */
+    fun openGroupMenu(g: EventGroup) {
+        val ctrl = dialogs ?: return
+        val deletable = g.events.filter { it.editable }
+        if (deletable.isEmpty()) {
+            ctrl.showConfirm(
+                ConfirmDialogSpec(
+                    title = legacyTitle,
+                    message = groupDeleteNone,
+                    confirmText = knownText,
+                    cancelText = "",
+                    onConfirm = {},
+                ),
+            )
+            return
+        }
+        ctrl.showConfirm(
+            ConfirmDialogSpec(
+                title = groupDeleteTitle,
+                message = groupDeleteMessage.format(deletable.size),
+                confirmText = groupDeleteAction,
+                cancelText = cancelText,
+                onConfirm = {
+                    // 一条条 commit 会写盘一百多次、令牌换一百多次，微信那边每次换令牌
+                    // 都整表重算一遍 —— 一次提交整段
+                    ops = RecordEdits.commitAll(ctx, deletable.map { "d|" + it.seq })
+                    Toast.makeText(
+                        ctx,
+                        groupDeleted.format(deletable.size),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    requestRefresh()
+                },
+            ),
+        )
     }
 
     /**
@@ -631,6 +680,14 @@ internal fun ImgLabelRecordScreen() {
                     ) {
                         val g = row.group
                         BasicComponent(
+                            // 点击 = 展开/收起，长按 = 整段删除。
+                            // 手势必须挂在这一层：onClick 传 null 时 miuix 的 BasicComponent
+                            // 内部不装 clickable（ComponentKt 里 onClick 为 null 直接走
+                            // Modifier.Companion），外层 combinedClickable 才收得到事件。
+                            modifier = Modifier.combinedClickable(
+                                onClick = { toggle(g.key) },
+                                onLongClick = { openGroupMenu(g) },
+                            ),
                             // 组头**永远是这一批的时间戳** —— 它就是「调出那一堆图」的入口；
                             // 旧版来源只作为摘要后缀，不能顶掉时间（顶掉了这段历史就没有时间入口）
                             title = groupTimeText(g, dayFmt, hmFmt, hmsFmt),
@@ -641,7 +698,7 @@ internal fun ImgLabelRecordScreen() {
                             },
                             // 展开 / 收起都是原地动作，朝下箭头不随状态变
                             endActions = { DownArrowIcon() },
-                            onClick = { toggle(g.key) },
+                            onClick = null,
                         )
                     }
 

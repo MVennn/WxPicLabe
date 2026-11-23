@@ -330,6 +330,11 @@
     <string name="record_event_edit_name">Rename</string>
     <string name="record_event_edit_nth">Change count</string>
     <string name="record_event_delete">Delete this</string>
+    <string name="record_group_delete_title">Delete this time range?</string>
+    <string name="record_group_delete_message">All %1$d records in this range leave the send history together. Photos already sent in WeChat stay untouched.</string>
+    <string name="record_group_delete_action">Delete range</string>
+    <string name="record_group_deleted">Deleted %1$d records in this range</string>
+    <string name="record_group_delete_none">This range is a legacy aggregate record with no per-event detail, so single entries can not be removed. To wipe everything, use "Clear send history".</string>
     <string name="record_delete_title">Delete this record?</string>
     <string name="record_delete_message">Only this record goes away. Photos already sent in WeChat stay untouched.</string>
     <string name="record_delete_confirm">Delete</string>
