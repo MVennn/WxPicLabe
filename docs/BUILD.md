@@ -23,10 +23,10 @@ build.cmd debug      :: debug，与 release 同口径（R8 + 关 debuggable）�
 
 产物：
 
-| 变体 | 路径 | 实测体积（2026-11-13） |
+| 变体 | 路径 | 实测体积（release 2026-11-23 / debug 2026-11-13） |
 | --- | --- | --- |
 | debug | `app\build\outputs\apk\debug\app-debug.apk` | 1,419,760 B（≈1.4 MB；改前 12.2 MB） |
-| release | `app\build\outputs\apk\release\app-release.apk` | 1,419,160 B（≈1.4 MB） |
+| release | `app\build\outputs\apk\release\app-release.apk` | 1,486,096 B（≈1.4 MB） |
 
 需要分发时另存副本（`dist/` 已被 gitignore，仓库不存 APK）。
 
