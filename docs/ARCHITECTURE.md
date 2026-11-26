@@ -4,7 +4,7 @@
 
 ## 目录结构（五层，与 GSAuxiliary 同一套约定）
 
-```
+```bash
 app/src/main/java/io/github/MVennn/WxPicLabel/
 ├── WxPicLabelModule.java    # Xposed 入口：唯一实现 XposedModule 的类（java_init.list 指向它）
 ├── feature/imglabel/        # 业务实现：跑在**微信进程**里
@@ -45,7 +45,7 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
 
 ## 发送路径（微信 8.0.80 实测）
 
-```
+```text
 相册点「发送」
    └─ on5.f#a(qa0.k params, …, Runnable 回调)     ← 拦这里，不放行微信的批量发送
         ├─ 调它自己的 Runnable，让相册界面收工（聊天页回到前台）
@@ -114,7 +114,7 @@ app/src/main/java/io/github/MVennn/WxPicLabel/
 
 设置系统属性后进入聊天界面即可触发，不需要真的去相册选图：
 
-```sh
+```bash
 # 直接发一条文字（走真实 UiSender 链路：找输入框 → setText → 点发送）
 adb shell setprop debug.wxpiclabel.text hello
 

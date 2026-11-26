@@ -132,7 +132,7 @@ if (!scopeAllowed(chain.getArg(6))) {
 
 **微信进程 → 模块 App**：新增 `FriendBridgeProvider`。
 
-```
+```text
 authority = io.github.MVennn.WxPicLabel.bridge
 exported  = true
 android:permission 不声明（微信没有模块签名，signature 权限会把微信直接挡死，
@@ -163,7 +163,7 @@ ctx.getContentResolver().insert(Uri.parse("content://io.github.MVennn.WxPicLabel
 
 「发送设置」二级页新增一段「发送范围」（放在「重复图片」之前）：
 
-```
+```text
 发送范围
 ┌────────────────────────────┐
 │ 仅选中的会话生效          ● │

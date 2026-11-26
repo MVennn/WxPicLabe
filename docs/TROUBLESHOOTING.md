@@ -70,7 +70,7 @@
 
 ## 7. 不想每次去相册点选，怎么单测发送链路
 
-```sh
+```bash
 # 只测发送：进入任意聊天界面即触发一次（走真实 UiSender 链路）
 adb shell setprop debug.wxpiclabel.text 测试文本
 

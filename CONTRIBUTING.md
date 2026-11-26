@@ -33,12 +33,18 @@
 
 ## 几条硬规矩
 
+凭据与节点值一律占位符：语义与豁免见跨仓文档 `F:/Project/docs/PLACEHOLDERS.md`（在本仓库外）；`local.properties.example` 只写占位符，真值 `local.properties` 已被 `.gitignore` 排除。
+
 | 规矩 | 在哪定义 |
 | --- | --- |
 | 每条规则只在一篇文档里定义，别处只留链接 | [docs/DOC-RULES.md](docs/DOC-RULES.md) §2 |
 | 发版才动 `versionCode` / `versionName` | [docs/VERSIONING.md](docs/VERSIONING.md) |
 | 用户可感知的改动要进 [CHANGELOG.md](CHANGELOG.md) | [docs/DOC-RULES.md](docs/DOC-RULES.md) §5 |
 | 修缺陷必须补「现象 → 根因 → 怎么避」 | [docs/PITFALLS.md](docs/PITFALLS.md) |
+
+## 提交信息与 Git 约定
+
+Conventional Commits（`type(scope): subject`，按对象拆行）；tag 用 `vMAJOR.MINOR.PATCH`，只在发版时创建；分支与 release 步骤见跨仓 [GIT-WORKFLOW.md](../docs/GIT-WORKFLOW.md)。
 
 ## 免责声明
 
